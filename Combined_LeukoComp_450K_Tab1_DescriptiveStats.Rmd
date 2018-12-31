@@ -1,0 +1,156 @@
+---
+title: "Leukocyte Composition Analysis of Combined DNHS+GTP 450K Cell Estimates - Table 1 - Descriptive Statistics"
+author: "Grace Kim"
+date: '`r Sys.Date()`'
+output:
+  html_notebook: default
+  html_document: default
+  pdf_document: 
+    includes:
+        in_header:table-template.tex
+---
+
+```{r knitrOpt, message = FALSE}
+
+library(knitr) # general-purpose package for dynamic report generation in R.
+library(rmarkdown)
+library(xtable) # export tables to LaTeX or html
+library(shiny)
+library(stargazer)
+library(tools)
+
+rm(list = ls())
+
+opts_knit$set(concordance = TRUE, self.contained = FALSE)
+
+opts_chunk$set(
+  error = FALSE,
+  tidy = TRUE,
+  warning = FALSE,
+  highlight = TRUE,
+  cache = TRUE,
+  comment = NA,
+  autodep = TRUE,
+  dev = c('png', 'pdf'),
+  fig.align = 'center',
+  fig.path = 'figure/',
+  fig.show = 'asis',
+  dpi = 300,
+  echo = TRUE,
+  out.extra = "keepaspectratio"
+) # turn on cache for increased performance and improved styling.
+
+options(stringsAsFactors = FALSE, width = 70, digits = 4)
+render_listings()
+
+library(tidyverse)
+library(psych)
+library(Gmisc)
+
+```
+
+```{r loadData}
+
+HM450KDat_path <- "D:/Data/DNHS_Data/DNAm_450K/"
+load(file = paste0(HM450KDat_path, "CombPheno2wcue2_incTuk.Rdata"))
+
+rm(CombPheno2wcue2_tuk)
+
+```
+
+```{r out_dir}
+
+proj_label <- "Combined_LeukoComp_450K_Tab1"
+processing_date <- format(Sys.time(), "%Y%m%d")
+#' git SHA1 hash of last commit.
+git <- system("git rev-parse --short HEAD", intern = TRUE)
+#' output directory for process and plots
+out_dir <- paste0(processing_date,"_",proj_label,"_",git,"/")
+print(out_dir)
+
+# if (!file.exists(out_dir)) {
+# dir.create(out_dir,showWarnings = FALSE,recursive = FALSE)
+# }
+
+```
+
+Print out table 1 descriptive statistics
+
+### Table 1 Descriptive Stats
+
+```{r datatab1sel}
+
+datatab1sel <- CombPheno2wcue2 %>% filter(!is.na(PTSDlife)) %>% dplyr::select(one_of("Study", "Sex", "Race", "Age", "Smoking_pm","PTSDlife")) %>% dplyr::rename(PTSD = PTSDlife, Smoking = Smoking_pm)
+varnames <- colnames(datatab1sel)[-1]
+
+```
+
+```{r getT1Stat-fxn}
+
+library(Gmisc)
+# A function that takes the variable name,
+# applies it to the melanoma dataset
+# and then runs the results by the status variable
+getT1Stat <- function(varnames){
+getDescriptionStatsBy(datatab1sel[, varnames],
+datatab1sel$Study,
+add_total_col = "last",
+show_all_values = TRUE,
+continuous_fn = describeMedian,
+statistics = FALSE,
+html = TRUE,
+header_count = TRUE)
+}
+
+```
+
+```{r tab-data}
+# Save everything in a list
+# This simplifies the row grouping
+table_data <- list()
+# Get the basic stats
+table_data[["Sex"]] <- getT1Stat("Sex")
+table_data[["Race"]] <- getT1Stat("Race")
+table_data[["Median Age"]] <- getT1Stat("Age")
+table_data[["Current Smoking"]] <- getT1Stat("Smoking")
+table_data[["Lifetime PTSD"]] <- getT1Stat("PTSD")
+# Now merge everything into a matrix
+# and create the rgroup & n.rgroup variables
+rgroup <- c()
+n.rgroup <- c()
+output_data <- NULL
+for (varlabel in names(table_data)) {
+output_data <- rbind(output_data,
+table_data[[varlabel]])
+rgroup <- c(rgroup,
+varlabel)
+n.rgroup <- c(n.rgroup,
+nrow(table_data[[varlabel]]))
+}
+output_data
+
+```
+
+```{r htmlTab}
+
+# options(htmlTable.cat = TRUE)
+htmlTable(output_data, align = "lrr",
+rgroup = rgroup, n.rgroup = n.rgroup,
+rgroupCSSseparator = "",
+rowlabel = "",
+caption = "Key demographic characteristics of the DNHS and GTP",
+tfoot = "This table describes the subset of participants included in primary analyses investigating sex-specific associations between DNAm-based cell estimates and lifetime PTSD.", ctable = TRUE)
+
+```
+
+html table printed out in this R notebook was used as Table 1 for this paper.  The table was copy and pasted onto word docx for additional formatting and addition of remaining footnote.  (only first sentence included here.)
+
+
+```{r save-end}
+
+# save.image(paste0(proj_label, ".RData"))
+sessionInfo()
+
+```
+
+

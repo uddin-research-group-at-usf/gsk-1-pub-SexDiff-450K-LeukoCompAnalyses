@@ -1,0 +1,239 @@
+---
+title: "Phenotype Prep and Transformation of Combined DNHS+GTP 450K Cell Estimates"
+author: "Grace Kim"
+date: '`r Sys.Date()`'
+output:
+  html_notebook: default
+  html_document: default
+  pdf_document: 
+    includes:
+        in_header:table-template.tex
+---
+
+```{r knitrOpt, message = FALSE}
+
+library(knitr) # general-purpose package for dynamic report generation in R.
+library(rmarkdown)
+library(xtable) # export tables to LaTeX or html
+library(shiny)
+library(stargazer)
+library(tools)
+
+rm(list = ls())
+
+opts_knit$set(concordance = TRUE, self.contained = FALSE)
+
+opts_chunk$set(
+  error = FALSE,
+  tidy = TRUE,
+  warning = FALSE,
+  highlight = TRUE,
+  cache = TRUE,
+  comment = NA,
+  autodep = TRUE,
+  dev = c('png', 'pdf'),
+  fig.align = 'center',
+  fig.path = 'figure/',
+  fig.show = 'asis',
+  dpi = 300,
+  echo = TRUE,
+  out.extra = "keepaspectratio"
+) # turn on cache for increased performance and improved styling.
+
+options(stringsAsFactors = FALSE, width = 70, digits = 4)
+render_listings()
+
+library(tidyverse)
+library(GGally)
+library(data.table)
+library(psych)
+library(rcompanion)
+library(faraway)      # glm support
+library(car)          # regression functions (continuous)
+library(sandwich) ## heteroskedasticity robust standard errors.  
+library(lmtest)   ## lm test
+library(nortest) ## normality test
+## further list of useful libraries in RegDiagNotes.Rmd
+library(moments)
+library(e1071)                    
+
+```
+
+This notebook loads fully processed combined DNHS+GTP 450K phenotype data that includes all cell estimates calculated on the combined dataset, based on *EpiDISH* generated in the **Combined\_450K\_BatchAdjsepwComBat\_Estimates\_2.Rmd** notebook in data processing repo.  
+
+```{r loadData}
+
+HM450KDat_path <- "D:/Data/DNHS_Data/DNAm_450K/"
+load(file = paste0(HM450KDat_path, "Combined_450K_BatchAdjsepwComBat_Estimates.Rdata"))
+load(file = "D://Data/Combined_450K_Pheno.Rdata")
+
+```
+
+```{r out_dir}
+
+proj_label <- "Combined_PhenoPrep_Transform_0"
+processing_date <- format(Sys.time(), "%Y%m%d")
+#' git SHA1 hash of last commit.
+git <- system("git rev-parse --short HEAD", intern = TRUE)
+#' output directory for process and plots
+out_dir <- paste0(processing_date,"_",proj_label,"_",git,"/")
+print(out_dir)
+
+# if (!file.exists(out_dir)) {
+# dir.create(out_dir,showWarnings = TRUE,recursive = FALSE)
+# }
+
+```
+
+Recode current PTSD Dx to try out GEO's for GTP. 
+
+```{r switch-PTSDpm2-gtp}
+
+CombPheno2wcue2 <- left_join(CombPheno2wcue, GTPpheno390wc4[, c("SampleID", "PTSD_Dx")], by = "SampleID")
+CombPheno2wcue2 <- CombPheno2wcue2 %>% mutate(PTSDpm2 = case_when(Study == "GTP" ~ PTSD_Dx, Study == "DNHS" ~ PTSDpm))
+
+table(CombPheno2wcue2$PTSDpm, CombPheno2wcue2$PTSDpm2)
+
+```
+
+Much more informative. More relevant to DNHS, because DNHS is also self-report.  Something seems obscure about the CAPS current PTSD.
+
+```{r addPTSDStatus2}
+
+CombPheno2wcue2 <- CombPheno2wcue2 %>% mutate(PTSDStatus2 = case_when(PTSDpm2 == "yes" ~ "Current", PTSDpm2 == "no" & PTSDlife == "yes" ~ "Remitted", PTSDlife == "no" ~ "No PTSD")) %>% mutate(PTSDStatus2 = factor(PTSDStatus2, levels = c("No PTSD", "Remitted", "Current")))
+
+```
+
+```{r cells-cknormality}
+
+cells <- CombPheno2wcue2 %>% dplyr::select(c(starts_with("RPC_"), starts_with("CP_"), starts_with("CBS_"))) %>% colnames()
+
+lapply(CombPheno2wcue2[,cells], shapiro.test)
+
+```
+
+only granulocytes pass normality test, and is trending
+
+```{r ck-normal-log, eval = FALSE, include = FALSE}
+
+lapply(CombPheno2wcue2[,cells], function(x) shapiro.test(log(x))) ## lot of NAs
+lapply(CombPheno2wcue2[,cells], function(x) shapiro.test(log2(x)))
+
+```
+
+```{r cells-ckdensity, message = FALSE}
+
+lapply(cells, function(x){
+  ggplot(CombPheno2wcue2, aes_string(x = x, y = "..density..")) + geom_density() + ggtitle(x)
+  
+})
+
+
+```
+
+```{r cells-ckskewkurt-untransformed}
+# To check skewness and kurtosis
+
+cat("\n \n Check skewness before transform using 2 methods. \n ")
+
+sapply(CombPheno2wcue2[,cells], moments::skewness)
+
+sapply(CombPheno2wcue2[,cells], e1071::skewness)
+
+cat("\n \n Check kurtosis before transform using 2 methods. \n ")
+
+sapply(CombPheno2wcue2[,cells], moments::kurtosis) ## Pearson's measure of kurtosis
+
+sapply(CombPheno2wcue2[,cells], e1071::kurtosis)
+
+```
+
+Cell Estimates are tukey-transformed for linear regression models.  
+
+```{r transformTukey}
+
+# cells_tuk <- c("B", "NK", "CD4T", "CD8T", "Mono", "Gran")
+
+Combined_cells_tuk <- CombPheno2wcue2[,c("SampleID", cells)]
+
+Combined_cells_tuk[,-1] <- sapply(Combined_cells_tuk[,-1], rcompanion::transformTukey)
+
+CombPheno2wcue2_nocell <- CombPheno2wcue2 %>% dplyr::select(-c(one_of(cells)))
+
+CombPheno2wcue2_tuk <- left_join(CombPheno2wcue2_nocell, Combined_cells_tuk, by = "SampleID")
+
+# lapply(Combined_cells_tuk[,-1], shapiro.test)
+
+```
+
+
+```{r CenterVar}
+
+CenterVar <- c("Comp.1", "Comp.2")
+
+CombPheno2wcue2_tuk[,CenterVar] <- sapply(CombPheno2wcue2_tuk[,CenterVar], function(x){
+  scale(x, center = TRUE, scale = FALSE)
+})
+
+sapply(CombPheno2wcue2_tuk[,CenterVar], summary)
+sapply(CombPheno2wcue2_tuk[,CenterVar], densityPlot)
+
+```
+
+```{r transformed-densplots}
+
+lapply(cells, function(x){
+  ggplot(CombPheno2wcue2_tuk, aes_string(x = x, y = "..density..")) + geom_density() + ggtitle(x)
+  
+})
+
+```
+
+```{r cells-tuk-cksk2}
+
+# To check skewness and kurtosis after transform
+
+cat("\n \n Check skewness after Tukey transform using 2 methods. \n ")
+sapply(CombPheno2wcue2_tuk[,cells], moments::skewness)
+
+sapply(CombPheno2wcue2_tuk[,cells], e1071::skewness)
+
+cat("\n \n Check kurtosis after Tukey transform using 2 methods. \n ")
+
+sapply(CombPheno2wcue2_tuk[,cells], moments::kurtosis) ## Pearson's measure of kurtosis
+sapply(CombPheno2wcue2_tuk[,cells], e1071::kurtosis)
+
+## improved. w transformation
+ 
+```
+
+```{r ck-numna, eval = FALSE, include = FALSE}
+
+lapply(CombPheno2wcue2_tuk, function(x){
+  length(x[is.na(x)])
+})
+
+```
+
+Improved, but not normality not fully addressed for all cell types.   
+Save both untransformed and Tukey-transformed phenotype data.  
+
+Note that Tukey-transformed phenotype data has ancestry PCs centered, but untransformed does not.  
+
+Also note that we decided to just use RPC and CP cell estimates due to lack of confidence in CBS estimates, which occasionally deviates and has been also noted in Salas et al. (2018).
+
+- Do plots (e.g., boxplots/violinplots(?) and density plots) on both untransformed and tukey-transformed data.  Can you see some patterns in Tukey-transformed that weren't visible in untransformed data?  What does this mean?
+- ggduo? and strat by sex?
+- Parametric and non-parametric tests.  
+
+## Save
+
+```{r sessionInfo}
+
+save(CombPheno2wcue2_tuk, CombPheno2wcue2, file = paste0(HM450KDat_path, "CombPheno2wcue2_incTuk.Rdata"))
+
+save.image(paste0(proj_label, ".RData"))
+
+sessionInfo()
+
+```

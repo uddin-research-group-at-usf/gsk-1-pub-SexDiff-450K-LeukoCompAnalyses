@@ -1,0 +1,282 @@
+---
+title: "Additional Figures and Plots - Combined DNHS+GTP 450K Cell Estimates - v3"
+author: "Grace Kim"
+date: '`r Sys.Date()`'
+output:
+  html_notebook: default
+  html_document: default
+  pdf_document: 
+    includes:
+        in_header:table-template.tex
+---
+
+
+```{r knitrOpt, message = FALSE}
+
+library(knitr) # general-purpose package for dynamic report generation in R.
+library(rmarkdown)
+library(xtable) # export tables to LaTeX or html
+library(shiny)
+library(stargazer)
+library(tools)
+
+# rm(list = ls())
+
+opts_knit$set(concordance = TRUE, self.contained = FALSE)
+
+opts_chunk$set(
+  error = FALSE,
+  tidy = TRUE,
+  warning = FALSE,
+  highlight = TRUE,
+  cache = TRUE,
+  comment = NA,
+  autodep = TRUE,
+  dev = c('png', 'pdf'),
+  fig.align = 'center',
+  fig.path = 'figure/',
+  fig.show = 'asis',
+  dpi = 300,
+  echo = TRUE,
+  out.extra = "keepaspectratio"
+) # turn on cache for increased performance and improved styling.
+
+options(stringsAsFactors = FALSE, width = 70, digits = 4)
+render_listings()
+
+library(tidyverse)
+library(GGally)
+library(data.table)
+library(ggpubr)
+library(ggsci)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(RColorBrewer)
+library(scales)
+
+```
+
+Generates some additional plots and figures, not in original set generated in **Combined_LeukoComp_450K_FigPlots.Rmd**.  
+Load saved image from original set.  
+
+```{r loadData-old-image}
+
+HM450KDat_path <- "D:/Data/DNHS_Data/DNAm_450K/"
+load(file = paste0(HM450KDat_path, "CombPheno2wcue2_incTuk.Rdata"))
+
+table(CombPheno2wcue2$PTSDlife, CombPheno2wcue2$Sex)
+
+```
+
+```{r out_dir}
+
+proj_label <- "added_Figures_Plots_v3"
+processing_date <- format(Sys.time(), "%Y%m%d")
+#' git SHA1 hash of last commit.
+git <- system("git rev-parse --short HEAD", intern = TRUE)
+#' output directory for process and plots
+out_dir <- paste0(processing_date,"_",proj_label,"_",git,"/")
+print(out_dir)
+
+if (!file.exists(out_dir)) {
+dir.create(out_dir,showWarnings = FALSE,recursive = FALSE)
+}
+
+```
+
+
+```{r CombPheno2wcue2-rmpheno}
+
+cells <- CombPheno2wcue2 %>% dplyr::select(c(ends_with("_Mono"), ends_with("_Gran"), ends_with("_CD4T"), ends_with("_CD8T"), ends_with("_NK"), ends_with("_B", ignore.case = FALSE))) %>% dplyr::select(-starts_with("CBS_")) %>% colnames()
+
+CombPheno2wcue2 <- CombPheno2wcue2 %>% mutate_at(vars(cells), funs(.*100)) %>% filter(!is.na(PTSDlife)) 
+CombPheno2wcue2
+
+```
+
+- final set. v3. 
+- scale everything as percent.
+
+```{r set-palette}
+
+sexpalbrewed <- brewer.pal(8, "Dark2")
+sexpal <- sexpalbrewed[c(2,3)]
+
+ptsdpal <- c("#619CFF", "#DC0000E5") ## 
+ptsdpal2 <- c("#619CFF", "#00BA38", "#E64B35E5") ## 
+
+```
+
+
+```{r pheno450k_allCE}
+
+rpc <- CombPheno2wcue2 %>% dplyr::select(c(starts_with("RPC_"), matches("SampleID")))
+colnames(rpc) <- gsub(colnames(rpc), pattern = "RPC_", replacement = "")
+
+vars <- CombPheno2wcue2 %>% dplyr::select(-c(starts_with("RPC_"), starts_with("CBS_")))
+colnames(vars) <- gsub(colnames(vars), pattern = "CP_", replacement = "")
+
+vars.dtl <- melt(data.table(vars), 
+                 # id.vars = "SampleID", 
+                 measure.vars = c("B", "NK", "CD4T", "CD8T", "Gran", "Mono"), 
+                 variable.name = "CellType", 
+                 value.name = "CP")
+
+rpc.dtl <- melt(data.table(rpc), 
+                 id.vars = "SampleID", 
+                 measure.vars = c("B", "NK", "CD4T", "CD8T", "Gran", "Mono"), 
+                 variable.name = "CellType", 
+                 value.name = "RPC")
+
+setkey(rpc.dtl, SampleID, CellType)
+setkey(vars.dtl, SampleID, CellType)
+
+pheno450k_allCE <- merge(vars.dtl,rpc.dtl,by = c("SampleID","CellType"))
+pheno450k_allCE
+
+```
+
+```{r suppfig1-pheno450k_allCE-plotcor-spearman}
+
+pdf(file = paste0(out_dir, "SuppFig1Raw_CorComp_bySex_spearman.pdf"), width = 9, height = 5, title = paste0("SuppFig1_CorComp_spearman"), bg = "transparent")
+
+ggscatter(data = pheno450k_allCE, x = "CP", y = "RPC", color = "Sex", palette = sexpal, point = TRUE, facet.by = "CellType", add = "reg.line", conf.int = TRUE, size = 1) +
+  stat_cor(aes(color = Sex), method = "spearman") +
+  geom_abline(slope = 1, intercept = 0) +
+  theme(strip.text = element_text(size = 14, face = "bold"),    text = element_text(size = 14, face = "bold"),
+legend.title = element_text(face = "bold"), axis.title = element_text(face = "bold"), axis.text = element_text(face = "plain", size = 12), legend.position = "right", axis.title.x = element_text(margin = margin(0.5, 0, 0, 0, unit = "cm")), axis.title.y = element_text(margin = margin(0, 0.5, 0, 0, unit = "cm")))
+# , plot.tag = element_text(face = "bold")
+dev.off()
+        
+```
+
+Spearman makes the most sense. 
+Spearman rank correlation: Spearman rank correlation is a non-parametric test that is used to measure the degree of association between two variables.  The Spearman rank correlation test does not carry any assumptions about the distribution of the data and is the appropriate correlation analysis when the variables are measured on a scale that is at least ordinal.
+
+
+
+```{r fig1-suppfig2-densityPlots-fig1-ggpubr}
+
+pdf(file = paste0(out_dir, "Fig1Raw_RPC_DensityPlot_byCellType.pdf"), width = 9, height = 5, title = paste0("Fig1Raw_RPC_Density_byCellType"), bg = "transparent")
+
+p1 <- ggdensity(pheno450k_allCE, x = "RPC", fill = "Sex", color = "Sex", palette = sexpal, facet.by = "CellType", alpha = 0.5) + theme(strip.text = element_text(face = "bold", size = 12), legend.text = element_text(size = 11, face = "plain"), legend.title = element_text(face = "bold", size = 12), axis.title = element_text(size = 12, face = "bold"), axis.text = element_text(size = 12, face = "plain"), legend.position = "bottom", axis.title.x = element_text(margin = margin(0.23, 0, 0, 0, unit = "cm")))
+
+print(p1)
+
+dev.off()
+
+pdf(file = paste0(out_dir,"SuppFig2Raw_CP_DensityPlot_byCellType.pdf"), width = 9, height = 5, title = paste0("SuppFig2Raw_CP_DensityPlot_byCellType"), bg = "transparent")
+
+p2d <- ggdensity(pheno450k_allCE, x = "CP", fill = "Sex", color = "Sex", palette = sexpal, facet.by = "CellType", alpha = 0.5) + theme(strip.text = element_text(face = "bold", size = 12), legend.text = element_text(size = 11, face = "plain"), legend.title = element_text(face = "bold", size = 12), axis.title = element_text(size = 12, face = "bold"), axis.text = element_text(size = 12, face = "plain"), legend.position = "bottom", axis.title.x = element_text(margin = margin(0.23, 0, 0, 0, unit = "cm")))
+
+print(p2d)
+
+dev.off()
+
+# removed options. add = mean, rug = TRUE
+
+```
+
+
+
+```{r fig2violinplot-RPC-ggpubr-fig2}
+
+## add p-values comparing groups, via non-parametric Mann-Whitney U test. 
+
+## non-parametric: Mann-Whitney U test
+compare_means(formula = c(RPC_Gran, RPC_Mono, RPC_B, RPC_CD4T, RPC_CD8T, RPC_NK) ~ PTSDlife, data = CombPheno2wcue2, method = "wilcox.test", paired = FALSE, group.by = "Sex", ref.group = "no", p.adjust.method = "holm")
+
+ pdf(file = paste0(out_dir, "Fig2Raw_RPCest_violinplots.pdf"),
+    bg = "transparent",
+    width = 9,
+    height = 5
+  )
+
+  p <- ggviolin(pheno450k_allCE, x = "CellType", y = "RPC", fill = "PTSDlife", color = "PTSDlife", palette = ptsdpal, facet.by = "Sex", alpha = 0.5, xlab = "Leukocyte Subtype", legend.title = "PTSD Status", position = "dodge")  +
+    stat_compare_means(aes(group = PTSDlife, label = ..p.signif.., size = 36), method = "wilcox.test", paired = FALSE,  hide.ns = TRUE, label.y.npc = "top") +
+    xlab("") +
+    ylim(min(pheno450k_allCE$RPC), max(pheno450k_allCE$RPC)) +
+    theme_pubr(border = TRUE, legend = "right", x.text.angle = 50) +
+    theme(
+      strip.text = element_text(face = "bold", size = rel(1.2)),
+      axis.title.y = element_text(face = "bold", margin = margin(0, 0.5, 0, 0, unit = "cm")), 
+        # legend.position = "right",
+      legend.title = element_text(face = "bold"))  
+  
+print(p)
+  
+dev.off()
+
+```
+
+
+```{r fig3-fig5-density-mono-bySex-fig-ggpubr}
+
+## extra page for some reason
+CombPheno2wcue2 <- CombPheno2wcue2 %>% mutate(PTSDlife = factor(PTSDlife, labels = c("No PTSD", "PTSD")))
+
+rpc_ptsdlifed <- ggdensity(CombPheno2wcue2, x = "RPC_Mono", color = "PTSDlife", fill = "PTSDlife", palette = ptsdpal, facet.by = "Sex", alpha = 0.4, rug = TRUE, legend.title = "Lifetime PTSD", xlab = FALSE) + theme(strip.text = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 11, face = "plain"),
+        legend.title = element_text(face = "bold", size = 12), axis.title = element_text(size = 12, face = "bold"),
+        axis.text = element_text(size = 12, face = "plain"),
+        legend.position = "top")
+
+cp_ptsdlifed <- ggdensity(CombPheno2wcue2, x = "CP_Mono", color = "PTSDlife", fill = "PTSDlife", palette = ptsdpal, facet.by = "Sex", alpha = 0.4, rug = TRUE, legend.title = "Lifetime PTSD", xlab = FALSE) + theme(strip.text = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 11, face = "plain"),
+        legend.title = element_text(face = "bold", size = 12), axis.title = element_text(size = 12, face = "bold"),
+        axis.text = element_text(size = 12, face = "plain"), legend.position = "top")
+
+CombPheno2wcue3 <- CombPheno2wcue2 %>% mutate(PTSDStatus3 = case_when(!PTSDStatus == PTSDStatus2 ~ NA_character_, TRUE ~ as.character(PTSDStatus))) %>% mutate(PTSDStatus3 = factor(PTSDStatus3, levels = c("No PTSD", "Remitted", "Current"))) %>% filter(!is.na(PTSDStatus3))
+
+
+rpc_ptsdstatus3d <- ggdensity(CombPheno2wcue3, x = "RPC_Mono", color = "PTSDStatus3", fill = "PTSDStatus3", palette = ptsdpal2, facet.by = "Sex", alpha = 0.4, rug = TRUE, legend.title = "PTSD Status", xlab = "RPC Mono") + theme(strip.text = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 11, face = "plain"),
+        legend.title = element_text(face = "bold", size = 12), axis.title = element_text(size = 12, face = "bold"),
+        axis.text = element_text(size = 12, face = "plain"),
+        legend.position = "top", axis.title.x = element_text(margin = margin(0.23, 0, 0, 0, unit = "cm")))
+
+cp_ptsdstatus3d <- ggdensity(CombPheno2wcue3, x = "CP_Mono", color = "PTSDStatus3", fill = "PTSDStatus3", palette = ptsdpal2, facet.by = "Sex", alpha = 0.4, rug = TRUE, legend.title = "PTSD Status", xlab = "CP Mono")  + theme(strip.text = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 11, face = "plain"),
+        legend.title = element_text(face = "bold", size = 12), axis.title = element_text(size = 12, face = "bold"),
+        axis.text = element_text(size = 12, face = "plain"),
+        legend.position = "top", axis.title.x = element_text(margin = margin(0.23, 0, 0, 0, unit = "cm")))
+
+
+
+
+pdf(file = paste0(out_dir,"Fig3Raw_Mono_DensityPlot_PTSDlife.pdf"), bg = "transparent", width = 6.5, height = 7.5)
+
+print(ggarrange(rpc_ptsdlifed, cp_ptsdlifed, nrow = 2, legend = "top"))
+  
+dev.off()
+
+
+pdf(file = paste0(out_dir,"Fig5Raw_Mono_DensityPlot_PTSDStatus.pdf"), bg = "transparent", width = 6.5, height = 7.5)
+
+print(ggarrange(rpc_ptsdstatus3d, cp_ptsdstatus3d, nrow = 2, legend = "top"))
+  
+dev.off()
+
+  
+```
+
+
+Figure 4 raw files were derived separately in emmeans analysis folder.  
+
+## Save
+
+```{r date-git}
+
+cat("\n \n This iteration was run on ", processing_date, ".  SHA1 hash for last git commit is ", git, ". \n \n ", sep = "")
+
+```
+
+```{r sessionInfo}
+
+save.image(paste0(out_dir, proj_label, ".RData"))
+
+sessionInfo()
+
+```
+

@@ -1,0 +1,648 @@
+---
+title: "Leukocyte Composition Analysis of Combined DNHS+GTP 450K Cell Estimates - sex*PTSD 2-way ANCOVA with sqrt-transformed monocyte estimates"
+author: "Grace Kim"
+date: '`r Sys.Date()`'
+output:
+  html_notebook: default
+  html_document: default
+  pdf_document: 
+    includes:
+        in_header:table-template.tex
+---
+
+```{r knitrOpt, message = FALSE}
+
+library(knitr) # general-purpose package for dynamic report generation in R.
+library(rmarkdown)
+library(xtable) # export tables to LaTeX or html
+library(shiny)
+library(stargazer)
+library(tools)
+
+rm(list = ls())
+
+opts_knit$set(concordance = TRUE, self.contained = FALSE)
+
+opts_chunk$set(
+  error = FALSE,
+  tidy = TRUE,
+  warning = FALSE,
+  highlight = TRUE,
+  cache = TRUE,
+  comment = NA,
+  autodep = TRUE,
+  dev = c('png', 'pdf'),
+  fig.align = 'center',
+  fig.path = 'figure/',
+  fig.show = 'asis',
+  dpi = 300,
+  echo = TRUE,
+  out.extra = "keepaspectratio"
+) # turn on cache for increased performance and improved styling.
+
+options(stringsAsFactors = FALSE, width = 70, digits = 4)
+render_listings()
+
+library(tidyverse)
+library(GGally)
+# library(data.table)
+library(psych)
+library(rcompanion)
+library(car)          # regression functions (continuous)
+library(sandwich) ## heteroskedasticity robust standard errors.  
+library(lmtest)   ## lm test
+library(nortest) ## normality test
+## further list of useful libraries in RegDiagNotes.Rmd
+
+library(MASS) ## negative binomial support
+library(emmeans) ##contrast
+library(phia) ## testInteractions
+library(lme4)         # random effects
+library(goft)
+library(jtools)
+library(sjstats)
+library(Gmisc)
+library(multcompView)
+library(Rmisc)
+library(ggpubr)
+library(ggfortify)
+
+```
+
+note: ancPCs aren't centered here. sqrt transform is done on full data before subsetting for availability of phenotype data.  
+
+This notebook loads fully processed combined DNHS+GTP 450K phenotype data that includes all cell estimates based on *EpiDISH*'s implementation of robust partial correlation (RPC) and constrained projection (CP) generated in the **Combined\_450K\_BatchAdjsepwComBat\_Estimates\_2.Rmd** notebook in data processing repo.  These cell estimates were calculated after combining the datasets. 
+
+```{r loadData}
+
+HM450KDat_path <- "D:/Data/DNHS_Data/DNAm_450K/"
+load(file = paste0(HM450KDat_path, "CombPheno2wcue2_incTuk.Rdata"))
+
+rm(CombPheno2wcue2_tuk)
+
+```
+
+```{r out_dir}
+
+proj_label <- "Combined_LeukoCompLM_450K_sqrt_Mono100"
+processing_date <- format(Sys.time(), "%Y%m%d")
+#' git SHA1 hash of last commit.
+git <- system("git rev-parse --short HEAD", intern = TRUE)
+#' output directory for process and plots
+out_dir <- paste0(processing_date,"_",proj_label,"_",git,"/")
+print(out_dir)
+
+if (!file.exists(out_dir)) {
+dir.create(out_dir,showWarnings = FALSE,recursive = FALSE)
+}
+
+```
+
+
+```{r tab-breakdown}
+
+cells <- c("RPC_Mono", "CP_Mono")
+
+data <- CombPheno2wcue2 %>% mutate_at(vars(cells), funs(.*100)) %>% dplyr::select(-"Smoking") %>% dplyr::rename(ancPC1 = Comp.1, ancPC2 = Comp.2, Smoking = Smoking_pm)
+data2 <- data %>% filter(!is.na(Smoking) & !is.na(PTSDlife))
+
+```
+
+```{r before-sqrt}
+
+lapply(data[,cells], shapiro.test)
+
+lapply(cells, function(x){
+  ggplot(data, aes_string(x = x, y = "..density..")) + geom_density() + ggtitle(x)
+  
+})
+
+```
+
+Check normality using Shapiro-Wilks.  
+Then, run sqrt transform on all available participants, including those without phenotype data.  
+
+Cell Estimates are sqrt-transformed for linear regression models.  previous checks showed that log/logit transform is clearly insufficient.  
+This was done after realizing in tukey transform that chosen lambda was approximately sqrt. so that transform between estimates would be the same.  
+
+```{r after-sqrt}
+
+lapply(data[,cells], function(x) shapiro.test(sqrt(x)))
+
+lapply(cells, function(x){
+  sqrtcell <- data.frame(sqrt(data[,x]))
+  names(sqrtcell) <- x
+  ggplot(sqrtcell, aes_string(x = x, y = "..density..")) + geom_density() + ggtitle(x)
+  
+})
+
+```
+
+
+sqrt-transform successfully improves distribution of both monocyte estimates.  Both pass Shapiro-Wilk normality test. Apply square root transformation of monocyte estimates as response for linear model fit.
+backtransform for plots after post-hoc EMM tests
+
+## RPC monocyte estimates 
+
+### Pre-checks for assumptions
+
+```{r ck-normality-by-group-rpc}
+
+shapiro.test(sqrt(data2$RPC_Mono)[data2$group == "Female.noPTSD"])
+shapiro.test(sqrt(data2$RPC_Mono)[data2$group == "Male.noPTSD"])
+shapiro.test(sqrt(data2$RPC_Mono)[data2$group == "Female.PTSD"])
+shapiro.test(sqrt(data2$RPC_Mono)[data2$group == "Male.PTSD"])
+
+```
+
+normality checks out after sqrt transform for all subgroups.
+
+```{r ck-eq-variance-rpc}
+
+car::leveneTest(sqrt(RPC_Mono) ~ Sex*PTSDlife, data = data2)
+## trending, but ok. 
+
+```
+
+
+```{r descriptive-RPC_mono-orig}
+
+sum_RPCorig <- Rmisc::summarySE(data2, 
+                measurevar = "RPC_Mono", 
+                groupvars = c("Sex","PTSDlife"))
+sum_RPCorig
+
+```
+
+### Two-way ANCOVA
+
+Since the design is unbalanced, used Type III sum of squares. 
+
+```{r fit-ancova-rpc}
+
+## two-way anova w/ interaction effect.  
+
+### If you use type="III", you need the options line before  analysis
+options(contrasts = c("contr.sum", "contr.poly"))
+# options(contrasts = c("contr.helmert", "contr.poly")) ## or spss like option.
+
+RPCfit <- lm(sqrt(RPC_Mono) ~ Sex*PTSDlife + Age + ancPC1 + ancPC2 + Smoking, data = data2)
+summary(RPCfit)
+
+RPCancova <- car::Anova(RPCfit, type = "III")
+# , contrasts=list(topic=contr.sum, sys=contr.sum)
+
+sjstats::anova_stats(RPCancova)
+
+```
+
+```{r ancova-tab-rpc}
+
+options(knitr.kable.NA = '') # this will hide missing values in the kable table
+kable(anova_stats(RPCancova, digits = 5)[-1,c(1,2,4,3,5,6,8)], format = "pandoc", caption = "ANCOVA table", row.names = FALSE)
+
+```
+
+
+- [sjstats has anova_stats fxn that includes effect size stats](https://cran.r-project.org/web/packages/sjstats/vignettes/anova-statistics.html)
+
+While not necessary, here's the main effect model.  
+
+```{r main-effect-model0-rpc}
+
+RPCfit0 <- lm(sqrt(RPC_Mono) ~ Sex + PTSDlife + Age + ancPC1 + ancPC2 + Smoking, data = data2)
+summary(RPCfit0)
+
+RPCancova0 <- car::Anova(RPCfit0, type = "III")
+sjstats::anova_stats(RPCancova0)
+
+```
+
+### Regression Diagnostics
+
+regression diagnostics. check in output directory 
+
+```{r regdiag-rpc}
+
+pdf(file = paste0(out_dir, "RPC_RegressionDiagnostics_Autoplot.pdf"), width = 17, height = 11, title = "RPC_RegressionDiagnostics_Autoplot", bg = "transparent")
+autoplot(RPCfit0, which = c(1:6)) + geom_point(aes(color = Sex:PTSDlife))
+autoplot(RPCfit, which = c(1:6)) + geom_point(aes(color = Sex:PTSDlife))
+dev.off()
+
+```
+
+```{r shapiro-test-normality-rpc}
+
+shapiro.test(RPCfit0$residuals)
+shapiro.test(RPCfit$residuals)
+
+```
+
+### post-hoc checks
+
+```{r ggplot2-age-rpc}
+
+ggplot(data2, aes(x = Age, y = sqrt(RPC_Mono), color = group)) +
+  geom_point(shape = 1) +
+  geom_smooth(method = lm)
+
+```
+
+```{r ggplot2-ancPC1-rpc}
+
+ggplot(data2, aes(x = ancPC1, y = sqrt(RPC_Mono), color = group)) +
+  geom_point(shape = 1) +
+  geom_smooth(method = lm)
+
+```
+
+```{r ggplot2-ancPC2-rpc}
+
+ggplot(data2, aes(x = ancPC2, y = sqrt(RPC_Mono), color = group)) +
+  geom_point(shape = 1) +
+  geom_smooth(method = lm)
+
+```
+
+Differences across groups in terms of associations of covariates and monocyte estimates don't seem substantial.. by intercept or slope. 
+
+### Estimated Marginal Means (EMM)
+
+[Basic EMMs vignette](https://cran.r-project.org/web/packages/emmeans/vignettes/basics.html)
+[informative vignette on CI and tests](https://cran.r-project.org/web/packages/emmeans/vignettes/confidence-intervals.html)
+[informative vignette on transformations and links](https://cran.r-project.org/web/packages/emmeans/vignettes/transformations.html)
+
+Value of marginal means: marginal means gives equal weight to each cell. In many situations (especially with experimental data), that is a much fairer way to compute marginal means, in that they are not biased by imbalances in the data. we are, in a sense, estimating what the marginal means would be, had the experiment been balanced. Estimated marginal means (EMMs) serve that need.
+- side note: however, there are some situations where equal weighting... some context of prediction ordinary MM may be better est of what's going on (outside of experimental setting, or in our case if the data was representative of population...bu it's not).   is not appropriate. 
+
+- Estimated marginal means (EMM) are based on a model – not directly on data. different model for same data may lead to different EMMs 
+- basis for EMMs is the reference grid for a given model. consists of all combinations of factor levels with each covar (continuous predictor) set to its average (by default) 
+  + To obtain the reference grid, consider all the predictors in the model. Here are the default rules for constructing the reference grid
+    + For each predictor that is a factor, use its levels (dropping unused ones)
+    + For each numeric predictor (covariate), use its average
+    + The reference grid is then a regular grid of all combinations of these reference levels.
+    
+EMM = least-squares mean
+- EMM are model's predictions over a regular grid of factor combinations or marginal averages. 
+
+- mean separation test for main factor with emmeans
+- emmeans designed for multi-factor situations
+
+```{r basics-mm-no, eval = FALSE, include = FALSE}
+
+# Assess numerically marginal results for lifetime PTSD.  obtain marginal means. 
+
+with(data2, tapply(RPC_Mono, PTSDlife, mean)) ## without accounting for sex... 
+
+## account for interaction.
+cell.means <- matrix(with(data2, 
+    tapply(RPC_Mono, interaction(Sex, PTSDlife), mean)), 
+    nrow = 2)
+cell.means
+
+## confirm the rows of matrix match plotted values. average each column
+
+apply(cell.means, 2, mean)
+
+## different from ordinary marginal means.  what's going on?  some observations lost making data unbalanced. 
+
+with(data2, table(Sex, PTSDlife))
+
+## reproduce marginal means by weighting cell means with these frequencies. 
+
+sum(c(135, 70) * cell.means[, 1])/(135 + 70) ## PTSD controls
+sum(c(184, 80) * cell.means[, 2])/(184 + 80) ## lifetime PTSD cases
+
+## big discrepancy between ordinary mean and marginal means is due to imbalance.  
+
+```
+
+[vignette regarding transformation](https://cran.r-project.org/web/packages/emmeans/vignettes/transformations.html)
+
+- when you do a back transformation. 
+- EMMs are back-transformed to original scale.
+- endpoints of CIs are back-transformed.
+- t-tests and p-values are left as is. 
+- SE ar converted to original scale using delta method.  These SEs were not used in construcing tests and CIs.  
+
+```{r ref-grid-rpc}
+
+RPC.rg <- ref_grid(RPCfit)
+RPC.rg
+RPC.rg @ grid ## shows weighting... continuous vars are just averaged... 
+
+# emmeans(RPC.rg, "PTSDlife", by = "Sex") ## using reference grid instead of lm fit, and calling like this is same as RPC.mono.emmint$emmeans
+
+```
+
+```{r emmeans-rpc}
+
+## simple contrast. 
+RPC.emm.s <- emmeans(RPCfit, ~ Sex*PTSDlife)
+str(RPC.emm.s)
+# pairs(RPC.emm.s, simple = "PTSDlife")
+pairs(RPC.emm.s, simple = "each", reverse = TRUE, adjusted = "tukey") ## includes both comparisons. 
+
+## interaction contrast
+RPC.mono.emmint <- emmeans(RPCfit, pairwise ~ PTSDlife | Sex) ## same as taking interaction but more organized and contrast is by sex as expected. 
+## set contrast for emmeans. an interaction contrast is contrasts of contrasts.  
+contr_rpc <- contrast(RPC.mono.emmint[[1]], "poly")
+## understand what contrasts are being estimated.  
+# coef(contr_rpc) ## contrast matrix. 
+## yes-no
+
+## type iii tests of interaction effects can be obtained via interaction contrasts. exactly same as ftest of sex*PTSDlife in anova.  
+test(contr_rpc, joint = TRUE) ## different from pairs b/c pairs is fratio. 
+
+RPC_cld_orig <- CLD(RPC.mono.emmint$emmeans, alpha = 0.05, type = "response", Letters = letters)
+###  Remove spaces in .group  
+RPC_cld_orig$.group = gsub(" ", "", RPC_cld_orig$.group)
+RPC_cld_orig
+
+```
+
+#### Interaction Plots
+
+```{r RPC_cld-orig-scale}
+
+ptsdpal <- c("#619CFF", "#DC0000E5") ## 
+
+pd = position_dodge(0.4)    ### How much to jitter the points on the plot
+
+RPC_cld_int_plot <- ggplot(RPC_cld_orig,
+       aes(x     = Sex,
+           y     = response,
+           color = PTSDlife)) +
+
+    geom_point(shape  = 15,
+               size   = 4,
+             position = pd) +
+
+    geom_errorbar(aes(ymin  =  lower.CL,
+                      ymax  =  upper.CL),
+                      width =  0.2,
+                      size  =  0.7,
+                      position = pd) +
+
+    theme_bw() +
+    theme(axis.title   = element_text(face = "bold"),
+          axis.text    = element_text(face = "bold"),
+          plot.caption = element_text(hjust = 0)) +
+  ylab("Estimated marginal means\n RPC Monocyte") +
+  scale_color_manual(values = ptsdpal)
+
+ggsave(plot = RPC_cld_int_plot, "PlotIntPlot_RPC_Mono.pdf", width = 6.5, height = 7, device = "pdf", path = out_dir)
+
+RPC_cld_int_plot
+
+```
+
+Error bars indicate confidence intervals for the EMM (lsmeans).  Groups sharing the same letter are not significantly different (alpha = 0.05, Tukey-adjusted). 
+
+if interaction effect is significant, makes sense to present interaction plot of means for both main effects together in one plot.
+
+This shows that the only possible significant difference are for males between lifetime ptsd and controls.  
+
+
+
+Interaction plots show interaction. suggests that by sex, RPC mono goes up with lifetime PTSD, but that mean differs by sex.
+
+Two-way interaction plot, plots the mean (or other summary) of the response for two-way combinations of factors, thereby illustrating possible interactions.
+
+The p-value associated with the interaction term is sig. 
+
+```{r phia-intMeans-plot-rpc}
+
+library(phia)
+intmean1rpc <- interactionMeans(RPCfit)
+plot(intmean1rpc)
+
+```
+
+
+## CP monocyte estimates 
+
+### Pre-checks for assumptions
+
+```{r ck-normality-by-group-CP}
+
+shapiro.test(sqrt(data2$CP_Mono)[data2$group == "Female.noPTSD"])
+shapiro.test(sqrt(data2$CP_Mono)[data2$group == "Male.noPTSD"])
+shapiro.test(sqrt(data2$CP_Mono)[data2$group == "Female.PTSD"])
+shapiro.test(sqrt(data2$CP_Mono)[data2$group == "Male.PTSD"])
+
+```
+
+normality checks out after sqrt transform for all subgroups.
+
+```{r ck-eq-variance-CP}
+
+car::leveneTest(sqrt(CP_Mono) ~ Sex*PTSDlife, data = data2)
+## trending, but ok. 
+
+```
+
+
+```{r descriptive-CP_mono-orig}
+
+sum_CPorig <- Rmisc::summarySE(data2, 
+                measurevar = "CP_Mono", 
+                groupvars = c("Sex","PTSDlife"))
+sum_CPorig
+
+```
+
+### Two-way ANCOVA
+
+Since the design is unbalanced, used Type III sum of squares. 
+
+```{r fit-ancova-CP}
+
+## two-way anova w/ interaction effect.  
+
+### If you use type="III", you need the options line before  analysis
+options(contrasts = c("contr.sum", "contr.poly"))
+# options(contrasts = c("contr.helmert", "contr.poly")) ## or spss like option.
+
+CPfit <- lm(sqrt(CP_Mono) ~ Sex*PTSDlife + Age + ancPC1 + ancPC2 + Smoking, data = data2)
+summary(CPfit)
+
+CPancova <- car::Anova(CPfit, type = "III")
+# , contrasts=list(topic=contr.sum, sys=contr.sum)
+
+sjstats::anova_stats(CPancova)
+
+```
+
+```{r ancova-tab-CP}
+
+options(knitr.kable.NA = '') # this will hide missing values in the kable table
+kable(anova_stats(CPancova, digits = 5)[-1,c(1,2,4,3,5,6,8)], format = "pandoc", caption = "ANCOVA table", row.names = FALSE)
+
+```
+
+
+- [sjstats has anova_stats fxn that includes effect size stats](https://cran.r-project.org/web/packages/sjstats/vignettes/anova-statistics.html)
+
+While not necessary, here's the main effect model.  
+
+```{r main-effect-model0-CP}
+
+CPfit0 <- lm(sqrt(CP_Mono) ~ Sex + PTSDlife + Age + ancPC1 + ancPC2 + Smoking, data = data2)
+summary(CPfit0)
+
+CPancova0 <- car::Anova(CPfit0, type = "III")
+sjstats::anova_stats(CPancova0)
+
+```
+
+### Regression Diagnostics
+
+regression diagnostics. check in output directory 
+
+```{r regdiag-CP}
+
+pdf(file = paste0(out_dir, "CP_RegressionDiagnostics_Autoplot.pdf"), width = 17, height = 11, title = "CP_RegressionDiagnostics_Autoplot", bg = "transparent")
+autoplot(CPfit0, which = c(1:6)) + geom_point(aes(color = Sex:PTSDlife))
+autoplot(CPfit, which = c(1:6)) + geom_point(aes(color = Sex:PTSDlife))
+dev.off()
+
+```
+
+```{r shapiro-test-normality-CP}
+
+shapiro.test(CPfit0$residuals)
+shapiro.test(CPfit$residuals)
+
+```
+
+### post-hoc checks
+
+```{r ggplot2-age-CP}
+
+ggplot(data2, aes(x = Age, y = sqrt(CP_Mono), color = group)) +
+  geom_point(shape = 1) +
+  geom_smooth(method = lm)
+
+```
+
+```{r ggplot2-ancPC1-CP}
+
+ggplot(data2, aes(x = ancPC1, y = sqrt(CP_Mono), color = group)) +
+  geom_point(shape = 1) +
+  geom_smooth(method = lm)
+
+```
+
+```{r ggplot2-ancPC2-CP}
+
+ggplot(data2, aes(x = ancPC2, y = sqrt(CP_Mono), color = group)) +
+  geom_point(shape = 1) +
+  geom_smooth(method = lm)
+
+```
+
+Differences across groups in terms of associations of covariates and monocyte estimates don't seem substantial.. by intercept or slope. 
+
+### Estimated Marginal Means (EMM)
+
+```{r ref-grid-CP}
+
+CP.rg <- ref_grid(CPfit)
+CP.rg
+CP.rg @ grid ## shows weighting... continuous vars are just averaged... 
+
+# emmeans(CP.rg, "PTSDlife", by = "Sex") ## using reference grid instead of lm fit, and calling like this is same as CP.mono.emmint$emmeans
+
+```
+
+```{r emmeans-CP}
+
+## simple contrast. 
+CP.emm.s <- emmeans(CPfit, ~ Sex*PTSDlife)
+str(CP.emm.s)
+# pairs(CP.emm.s, simple = "PTSDlife")
+pairs(CP.emm.s, simple = "each", reverse = TRUE, adjusted = "tukey") ## includes both comparisons. 
+
+## interaction contrast
+CP.mono.emmint <- emmeans(CPfit, pairwise ~ PTSDlife | Sex) ## same as taking interaction but more organized and contrast is by sex as expected. 
+## set contrast for emmeans. an interaction contrast is contrasts of contrasts.  
+contr_CP <- contrast(CP.mono.emmint[[1]], "poly")
+## understand what contrasts are being estimated.  
+# coef(contr_CP) ## contrast matrix. 
+## yes-no
+
+## type iii tests of interaction effects can be obtained via interaction contrasts. exactly same as ftest of sex*PTSDlife in anova.  
+test(contr_CP, joint = TRUE) ## different from pairs b/c pairs is fratio. 
+
+CP_cld_orig <- CLD(CP.mono.emmint$emmeans, alpha = 0.05, type = "response", Letters = letters)
+###  Remove spaces in .group  
+CP_cld_orig$.group = gsub(" ", "", CP_cld_orig$.group)
+CP_cld_orig
+
+```
+
+#### Interaction Plots
+
+```{r CP_cld-orig-scale}
+
+ptsdpal <- c("#619CFF", "#DC0000E5") ## 
+
+pd = position_dodge(0.4)    ### How much to jitter the points on the plot
+
+CP_cld_int_plot <- ggplot(CP_cld_orig,
+       aes(x     = Sex,
+           y     = response,
+           color = PTSDlife)) +
+
+    geom_point(shape  = 15,
+               size   = 4,
+             position = pd) +
+
+    geom_errorbar(aes(ymin  =  lower.CL,
+                      ymax  =  upper.CL),
+                      width =  0.2,
+                      size  =  0.7,
+                      position = pd) +
+
+    theme_bw() +
+    theme(axis.title   = element_text(face = "bold"),
+          axis.text    = element_text(face = "bold"),
+          plot.caption = element_text(hjust = 0)) +
+  ylab("Estimated marginal means\n CP Monocyte") +
+  scale_color_manual(values = ptsdpal)
+
+ggsave(plot = CP_cld_int_plot, "PlotIntPlot_CP_Mono.pdf", width = 6.5, height = 7, device = "pdf", path = out_dir)
+
+CP_cld_int_plot
+
+```
+
+Error bars indicate confidence intervals for the EMM (lsmeans).  Groups sharing the same letter are not significantly different (alpha = 0.05, Tukey-adjusted). 
+
+if interaction effect is significant, makes sense to present interaction plot of means for both main effects together in one plot.
+
+This shows that the only possible significant difference are for males between lifetime ptsd and controls.  
+
+Interaction plots show interaction. suggests that by sex, CP mono goes up with lifetime PTSD, but that mean differs by sex.
+
+Two-way interaction plot, plots the mean (or other summary) of the response for two-way combinations of factors, thereby illustrating possible interactions.
+
+The p-value associated with the interaction term is sig. 
+
+```{r phia-intMeans-plot-CP}
+
+library(phia)
+intmean1CP <- interactionMeans(CPfit)
+plot(intmean1CP)
+
+```
+
+## End
+
+```{r save-end}
+
+save.image(paste0(proj_label, ".RData"))
+sessionInfo()
+
+```

@@ -1,0 +1,327 @@
+---
+title: "Leukocyte Composition Analysis of Combined DNHS+GTP 450K Cell Estimates - sex*PTSD 2-way ANCOVA with sqrt-transformed monocyte estimates - follow-up"
+author: "Grace Kim"
+date: '`r Sys.Date()`'
+output:
+  html_notebook: default
+  html_document: default
+  pdf_document: 
+    includes:
+        in_header:table-template.tex
+---
+
+```{r knitrOpt, message = FALSE}
+
+library(knitr) # general-purpose package for dynamic report generation in R.
+library(rmarkdown)
+library(xtable) # export tables to LaTeX or html
+library(shiny)
+library(stargazer)
+library(tools)
+
+rm(list = ls())
+
+opts_knit$set(concordance = TRUE, self.contained = FALSE)
+
+opts_chunk$set(
+  error = FALSE,
+  tidy = TRUE,
+  warning = FALSE,
+  highlight = TRUE,
+  cache = TRUE,
+  comment = NA,
+  autodep = TRUE,
+  dev = c('png', 'pdf'),
+  fig.align = 'center',
+  fig.path = 'figure/',
+  fig.show = 'asis',
+  dpi = 300,
+  echo = TRUE,
+  out.extra = "keepaspectratio"
+) # turn on cache for increased performance and improved styling.
+
+options(stringsAsFactors = FALSE, width = 70, digits = 4)
+render_listings()
+
+library(tidyverse)
+library(GGally)
+# library(data.table)
+library(psych)
+library(rcompanion)
+library(car)          # regression functions (continuous)
+library(sandwich) ## heteroskedasticity robust standard errors.  
+library(lmtest)   ## lm test
+library(nortest) ## normality test
+## further list of useful libraries in RegDiagNotes.Rmd
+
+library(MASS) ## negative binomial support
+library(lme4)         # random effects
+library(goft)
+library(jtools)
+library(Gmisc)
+library(multcompView)
+library(Rmisc)
+library(ggpubr)
+library(ggfortify)
+
+library(sjstats)
+library(emmeans)
+
+```
+
+Follow-up on 2 way ANCOVA
+
+```{r load, message = FALSE}
+
+load("Combined_LeukoCompLM_450K_sqrt_Mono100.Rdata")
+
+```
+
+
+- ANCOVA with 3 digits intead of 5.
+adjust manually as necessary for small numbers
+
+```{r ancova-rpc}
+
+options(knitr.kable.NA = '') # this will hide missing values in the kable table
+kable(anova_stats(RPCancova, digits = 3)[-1,c(1,2,4,3,5,6,8)], format = "pandoc", caption = "ANCOVA table", row.names = FALSE)
+
+```
+
+```{r ancova-cp}
+ 
+options(knitr.kable.NA = '') # this will hide missing values in the kable table
+kable(anova_stats(CPancova, digits = 3)[-1,c(1,2,4,3,5,6,8)], format = "pandoc", caption = "ANCOVA table", row.names = FALSE)
+
+```
+
+n=469, b/c this group also was filtered for thosew ithout smoking data. 
+
+```{r describe-rpcmono}
+
+rpc_desc <- dplyr::group_by(data2, Sex, PTSDlife) %>%
+  summarise(
+    count = n(),
+    mean = mean(RPC_Mono, na.rm = TRUE),
+    # sd = sd(RPC_Mono, na.rm = TRUE), 
+    se = sd(RPC_Mono, na.rm = TRUE)/sqrt(n())
+  ) 
+# rpc_desc
+# 
+
+# merge descriptives with emmeans
+
+rpc_emm <- data.frame(RPC_cld_orig) %>% dplyr::select(-c(one_of(".group", "df")))
+# rpc_emm  
+
+rpc_desc2 <- left_join(rpc_desc, rpc_emm, by = c("Sex", "PTSDlife")) %>% rename(EMM = response)
+rpc_desc2 %>% kable(., format = "pandoc", caption = "RPC Monocyte by Group")
+
+```
+
+```{r describe-cpmono}
+
+CP_desc <- dplyr::group_by(data2, Sex, PTSDlife) %>%
+  summarise(
+    count = n(),
+    mean = mean(CP_Mono, na.rm = TRUE),
+    # sd = sd(CP_Mono, na.rm = TRUE), 
+    se = sd(CP_Mono, na.rm = TRUE)/sqrt(n())
+  ) 
+# CP_desc
+# 
+
+# merge descriptives with emmeans
+
+CP_emm <- data.frame(CP_cld_orig) %>% dplyr::select(-c(one_of(".group", "df")))
+# CP_emm  
+
+CP_desc2 <- left_join(CP_desc, CP_emm, by = c("Sex", "PTSDlife")) %>% rename(EMM = response)
+CP_desc2 %>% kable(., format = "pandoc", caption = "CP Monocyte by Group")
+
+```
+
+Summary for monocyte estimates
+
+Notes on descriptive statistic tables
+- EMM stands for estimated marginal means (i.e., least squares means).   
+- SE (in capital letters) refers to standard errors for EMM, while se (in lowercase) refers to standard errors for regular means.  
+- Lower and upper confidence limits are for 95% level.  
+- EMM and intervals were back-transformed from the square-root scale.  
+- significance level of alpha = 0.05 was used for EMM comparisons.    
+- results for pairwise comparison were averaged over levels for current smoking.  
+- degree of freedom was 461 and male lifetime PTSD cases were significantly different from other groups.  
+
+
+#### RPC emmeans explore
+
+```{r emmeans-rpc-explore}
+
+RPC.mono.emmint
+
+pairs(RPC.emm.s, simple = "each", reverse = TRUE, adjusted = "tukey") ## includes both comparisons. 
+
+# test(contr_rpc, joint = TRUE)
+
+RPC_cld_orig
+
+```
+
+```{r rpc-int2-pairwise}
+
+rpc.int2 <- emmeans(RPCfit, pairwise ~ Sex*PTSDlife)
+rpc.int2
+contr_rpc2 <- contrast(rpc.int2[[1]], "poly")
+contr_rpc2
+
+IC_st <- contrast(rpc.int2[[1]], interaction = c("poly", "consec"))
+IC_st
+
+coef(IC_st)
+
+test(IC_st, joint = TRUE)
+
+
+contrast(emmeans(RPCfit, ~ Sex*PTSDlife), interaction = c("poly", "consec"))
+
+joint_tests(RPCfit)
+
+joint_tests(RPCfit, by = "Sex")
+
+test(contr_rpc2, joint = TRUE)
+
+```
+
+```{r rpc-cld-orig2-emmeans}
+
+RPC_cld_orig2 <- CLD(rpc.int2$emmeans, alpha = 0.05, type = "response", Letters = letters)
+###  Remove spaces in .group  
+RPC_cld_orig2$.group = gsub(" ", "", RPC_cld_orig2$.group)
+RPC_cld_orig2
+
+```
+
+pval adj : tukey method for comparing a family of 4 estimates. 
+```{r rpc-cld-orig2-contrasts}
+
+CLD(rpc.int2$contrasts, alpha = 0.05, type = "response", Letters = letters)
+###  Remove spaces in .group  
+RPC_cld_orig2$.group = gsub(" ", "", RPC_cld_orig2$.group)
+RPC_cld_orig2
+
+```
+
+
+#### CP emmeans explore
+
+```{r emmeans-CP-explore}
+
+CP.mono.emmint
+
+pairs(CP.emm.s, simple = "each", reverse = TRUE, adjusted = "tukey") ## includes both comparisons. 
+
+# test(contr_CP, joint = TRUE)
+
+CP_cld_orig
+
+```
+
+```{r CP-int2-pairwise}
+
+CP.int2 <- emmeans(CPfit, pairwise ~ Sex*PTSDlife)
+CP.int2
+contr_CP2 <- contrast(CP.int2[[1]], "poly")
+contr_CP2
+
+IC_st <- contrast(CP.int2[[1]], interaction = c("poly", "consec"))
+IC_st
+
+coef(IC_st)
+
+test(IC_st, joint = TRUE)
+
+
+contrast(emmeans(CPfit, ~ Sex*PTSDlife), interaction = c("poly", "consec"))
+
+joint_tests(CPfit)
+
+joint_tests(CPfit, by = "Sex")
+
+test(contr_CP2, joint = TRUE)
+
+```
+
+```{r CP-cld-orig2-emmeans}
+
+CP_cld_orig2 <- CLD(CP.int2$emmeans, alpha = 0.05, type = "response", Letters = letters)
+###  Remove spaces in .group  
+CP_cld_orig2$.group = gsub(" ", "", CP_cld_orig2$.group)
+CP_cld_orig2
+
+```
+
+pval adj : tukey method for comparing a family of 4 estimates. 
+```{r CP-cld-orig2-contrasts}
+
+CLD(CP.int2$contrasts, alpha = 0.05, type = "response", Letters = letters)
+###  Remove spaces in .group  
+CP_cld_orig2$.group = gsub(" ", "", CP_cld_orig2$.group)
+CP_cld_orig2
+
+```
+
+
+
+## Decided not to use. 
+
+```{r hmisc-cindex, message = FALSE, eval = FALSE, include = FALSE}
+
+## decided not to use. 
+
+library(Hmisc)
+attach(data2)
+
+male <- data2 %>% filter(Sex == "Male")
+fem <- data2 %>% filter(Sex == "Female")
+
+attach(male)
+somers2(RPC_Mono, PTSDlife == "no")
+somers2(RPC_Mono, PTSDlife == "yes")
+
+attach(fem)
+somers2(RPC_Mono, PTSDlife == "no")
+somers2(RPC_Mono, PTSDlife == "yes")
+
+
+# male <- data2 %>% filter(Sex == "Male") %>% mutate(PTSD = case_when(PTSDlife == "no" ~ 0, PTSDlife == "yes" ~ 1))
+# fem <- data2 %>% filter(Sex == "Female") %>% mutate(PTSD = case_when(PTSDlife == "no" ~ 0, PTSDlife == "yes" ~ 1))
+# 
+# somers2(male$RPC_Mono, male$PTSD)
+# somers2(fem$RPC_Mono, fem$PTSD)
+
+
+## notes. 
+# consider presenting c-index? concordance probability like auc
+# c-index is tightly related to mann whitney. 
+# computed from mean of the ranks. 
+# pretty similar to accuracy.. 
+# somers cor would need some explanation. 
+
+```
+
+- more for effect size.
+- decided not to use cohen's d.  similar to delta EMM/beta estimates in EMM comparisons.
+
+```{r cohend, eval = FALSE, include = FALSE}
+
+CombPheno2wcue3_f <- CombPheno2wcue3 %>% filter(Sex == "Female")
+CombPheno2wcue3_m <- CombPheno2wcue3 %>% filter(Sex == "Male")
+
+## on untransformed. 
+
+cohen.d(CombPheno2wcue3_f[,c("PTSDlife", "RPC_Mono", "CP_Mono")], group = "PTSDlife")
+
+cohen.d(CombPheno2wcue3_m[,c("PTSDlife", "RPC_Mono", "CP_Mono")], group = "PTSDlife")
+
+```
+
