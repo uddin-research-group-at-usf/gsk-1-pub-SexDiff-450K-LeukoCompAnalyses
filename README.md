@@ -10,10 +10,10 @@ Access to R notebooks used for QA and data processing (subdirectories in git rep
 There are 3 parts to the QA/data processing pipelines:  
 1. Detroit Neighborhood Health Study: (/DNHS/DNAm_450K/)  
 2. Grady Trauma Project: (/GTP/DNAm_450K/)  
-3. Combined DNHS + GTP processing: (/DNHS/DNAm_450K/)  
+3. Combined DNHS + GTP processing: (/Combined/DNAm_450K/)  
 
 More detailed description available in README file of each subdirectory.  
-Final output files derived from last step of pipeline (**Combined_450K_BatchAdjsepwComBat_Estimates_2.Rmd**) are: 
+Final output files derived from last step of combined pipeline (**Combined_450K_BatchAdjsepwComBat_Estimates_2.Rmd**) are: 
 - **Combined_450K_BatchAdjsepwComBat_Estimates.Rdata**
 - **Combined_450K_AdjsepwComBat_DatMats.Rdata**
 
