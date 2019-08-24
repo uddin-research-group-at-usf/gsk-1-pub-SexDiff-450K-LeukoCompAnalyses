@@ -103,67 +103,57 @@ CombPheno2wcue3 <- CombPheno2wcue2 %>% filter(!is.na(PTSDlife))
 
 ```
 
-Just calculate IQR and median.  
+```{r}
 
-```{r rpc-sex-iqr}
+# rpc
+## summary stats for RPC cell estimates by sex.  
+## standard median (not interpolated)
+## trimmed means (drop top/bottom 0.1 fraction)
+## type 3 skew/kurtosis
+### Type 3 is b1 = [(n-1)/n]^{3/2} m_3/m_2^{3/2} and b2 = [(n-1)/n]^{3/2} m_4/m_2^2).
 
-rpc_bySex_IQR <- lapply(rpc, function(x){
-
-    ks <- IQR(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Female"])
-    ksm <- IQR(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Male"])
-  cat("\n \n IQR for females in ", x, "\n")
-  print(ks)
-  cat("\n \n IQR for males in ", x, "\n")
-  print(ksm)
-  
+rpc_bysex_descStats <- sapply(rpc, function(x){
+bysex <- psych::describeBy(CombPheno2wcue2[,x], IQR = TRUE, group = CombPheno2wcue2$Sex)
+# print(bysex)
+# male <- psych::describe(CombPheno2wcue2_m[,x], IQR = TRUE)
+# print(male)
+# list = list(fem = fem, male = male)
+# return(list)
 })
+names(rpc_bysex_descStats) <- rpc
+
+rpc_bysex_descStats
 
 ```
 
+```{r}
 
-```{r cp-sex-iqr}
-
-cp_bySex_IQR <- lapply(cp, function(x){
-
-    ks <- IQR(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Female"])
-    ksm <- IQR(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Male"])
-  cat("\n \n IQR for females in ", x, "\n")
-  print(ks)
-  cat("\n \n IQR for males in ", x, "\n")
-  print(ksm)
-  
-})
-
-``` 
-
-
-```{r rpc-sex-med}
-
-rpc_bySex_med <- lapply(rpc, function(x){
-
-    ks <- median(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Female"])
-    ksm <- median(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Male"])
-  cat("\n \n median for females in ", x, "\n")
-  print(ks)
-  cat("\n \n median for males in ", x, "\n")
-  print(ksm)
-  
-})
+sapply(rpc, function(x){summary(CombPheno2wcue2_m[,x])})
+sapply(rpc, function(x){summary(CombPheno2wcue2_f[,x])})
 
 ```
 
+```{r}
 
-```{r cp-sex-med}
+sapply(cells[7:12], function(x){summary(CombPheno2wcue2_m[,x])})
+sapply(cells[7:12], function(x){summary(CombPheno2wcue2_f[,x])})
 
-cp_bySex_med <- lapply(cp, function(x){
+```
 
-    ks <- median(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Female"])
-    ksm <- median(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Male"])
-  cat("\n \n median for females in ", x, "\n")
-  print(ks)
-  cat("\n \n median for males in ", x, "\n")
-  print(ksm)
-  
+```{r}
+
+# cp
+## summary stats for RPC cell estimates by sex.  
+## standard median (not interpolated)
+## trimmed means (drop top/bottom 0.1 fraction)
+## type 3 skew/kurtosis
+### Type 3 is b1 = [(n-1)/n]^{3/2} m_3/m_2^{3/2} and b2 = [(n-1)/n]^{3/2} m_4/m_2^2).
+
+cp_bysex_descStats <- lapply(cells[7:12], function(x){
+psych::describeBy(CombPheno2wcue2[,x], IQR = TRUE, group = CombPheno2wcue2$Sex)
 })
+names(cp_bysex_descStats) <- cells[7:12]
 
-``` 
+cp_bysex_descStats
+
+```
