@@ -1,0 +1,310 @@
+---
+title: "Additional Figures and Plots - Combined DNHS+GTP 450K Cell Estimates"
+author: "Grace Kim"
+date: '`r Sys.Date()`'
+output:
+  html_notebook: default
+  html_document: default
+  pdf_document: 
+    includes:
+        in_header:table-template.tex
+---
+
+
+```{r knitrOpt, message = FALSE}
+
+library(knitr) # general-purpose package for dynamic report generation in R.
+library(rmarkdown)
+library(xtable) # export tables to LaTeX or html
+library(shiny)
+library(stargazer)
+library(tools)
+
+# rm(list = ls())
+
+opts_knit$set(concordance = TRUE, self.contained = FALSE)
+
+opts_chunk$set(
+  error = FALSE,
+  tidy = TRUE,
+  warning = FALSE,
+  highlight = TRUE,
+  cache = TRUE,
+  comment = NA,
+  autodep = TRUE,
+  dev = c('png', 'pdf'),
+  fig.align = 'center',
+  fig.path = 'figure/',
+  fig.show = 'asis',
+  dpi = 300,
+  echo = TRUE,
+  out.extra = "keepaspectratio"
+) # turn on cache for increased performance and improved styling.
+
+options(stringsAsFactors = FALSE, width = 70, digits = 4)
+render_listings()
+
+library(tidyverse)
+library(GGally)
+library(data.table)
+library(ggpubr)
+library(ggsci)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(RColorBrewer)
+library(scales)
+
+```
+
+Generates some additional plots and figures, not in original set generated in **Combined_LeukoComp_450K_FigPlots.Rmd**.  
+Load saved image from original set.  
+
+```{r loadData-old-image}
+
+# load("E://GitHub Repositories/gsk-1-SexDiff-Leukocyte/Combined_LeukoComp/20181119_Combined_LeukoComp_450K_Figures_Plots_930ea9a/Combined_LeukoComp_450K_Figures_Plots.RData")
+
+HM450KDat_path <- "D:/Data/DNHS_Data/DNAm_450K/"
+load(file = paste0(HM450KDat_path, "CombPheno2wcue2_incTuk.Rdata"))
+
+source("../ModelFxns.R")
+source("../PlotFxns.R")
+
+table(CombPheno2wcue2$PTSDlife, CombPheno2wcue2$Sex)
+
+```
+
+```{r out_dir}
+
+proj_label <- "added_Figures_Plots_rev1"
+processing_date <- format(Sys.time(), "%Y%m%d")
+#' git SHA1 hash of last commit.
+git <- system("git rev-parse --short HEAD", intern = TRUE)
+#' output directory for process and plots
+out_dir <- paste0(processing_date,"_",proj_label,"_",git,"/")
+print(out_dir)
+
+if (!file.exists(out_dir)) {
+dir.create(out_dir,showWarnings = FALSE,recursive = FALSE)
+}
+
+```
+
+
+```{r CombPheno2wcue2-rmpheno}
+
+cells <- CombPheno2wcue2 %>% dplyr::select(c(ends_with("_Mono"), ends_with("_Gran"), ends_with("_CD4T"), ends_with("_CD8T"), ends_with("_NK"), ends_with("_B", ignore.case = FALSE))) %>% dplyr::select(-starts_with("CBS_")) %>% colnames()
+
+CombPheno2wcue2 <- CombPheno2wcue2 %>% mutate_at(vars(cells), funs(.*100)) %>% filter(!is.na(PTSDlife)) 
+# CombPheno2wcue2 <- CombPheno2wcue2 %>% filter(!is.na(PTSDlife)) %>% filter(!Basename %in% knownhiv$Basename)
+CombPheno2wcue2
+
+```
+
+- final set. v3. 
+- scale everything as percent.
+
+
+```{r set-palette}
+
+sexpalbrewed <- brewer.pal(8, "Dark2")
+sexpal <- sexpalbrewed[c(2,3)]
+
+ptsdpal <- c("#619CFF", "#DC0000E5") ## 
+ptsdpal2 <- c("#619CFF", "#00BA38", "#E64B35E5") ## 
+
+```
+
+```{r pheno450k_allCE}
+
+rpc <- CombPheno2wcue2 %>% dplyr::select(c(starts_with("RPC_"), matches("SampleID")))
+colnames(rpc) <- gsub(colnames(rpc), pattern = "RPC_", replacement = "")
+
+vars <- CombPheno2wcue2 %>% dplyr::select(-c(starts_with("RPC_"), starts_with("CBS_")))
+colnames(vars) <- gsub(colnames(vars), pattern = "CP_", replacement = "")
+
+vars.dtl <- melt(data.table(vars), 
+                 # id.vars = "SampleID", 
+                 measure.vars = c("B", "NK", "CD4T", "CD8T", "Gran", "Mono"), 
+                 variable.name = "CellType", 
+                 value.name = "CP")
+
+rpc.dtl <- melt(data.table(rpc), 
+                 id.vars = "SampleID", 
+                 measure.vars = c("B", "NK", "CD4T", "CD8T", "Gran", "Mono"), 
+                 variable.name = "CellType", 
+                 value.name = "RPC")
+
+setkey(rpc.dtl, SampleID, CellType)
+setkey(vars.dtl, SampleID, CellType)
+
+pheno450k_allCE <- merge(vars.dtl,rpc.dtl,by = c("SampleID","CellType"))
+pheno450k_allCE
+
+```
+
+```{r corcomp-age-sp, eval = FALSE, include = FALSE}
+
+pdf(file = paste0(out_dir, "CorComp_Age_spearman.pdf"), width = 9, height = 5, title = paste0("CorComp_age_spearman"), bg = "transparent")
+
+ggscatter(data = pheno450k_allCE, x = "Age", y = "RPC", point = TRUE, facet.by = "CellType", add = "reg.line", conf.int = TRUE, size = 1) +
+  stat_cor(method = "spearman") +
+  theme(strip.text = element_text(size = 14, face = "bold"),    text = element_text(size = 14, face = "bold"),
+legend.title = element_text(face = "bold"), axis.title = element_text(face = "bold"), axis.text = element_text(face = "plain", size = 12), legend.position = "right", axis.title.x = element_text(margin = margin(0.5, 0, 0, 0, unit = "cm")), axis.title.y = element_text(margin = margin(0, 0.5, 0, 0, unit = "cm")))
+# , plot.tag = element_text(face = "bold")
+dev.off()
+
+
+pdf(file = paste0(out_dir, "CorComp_Age_spearman_bySex.pdf"), width = 9, height = 5, title = paste0("CorComp_age_spearman_bySex"), bg = "transparent")
+
+ggscatter(data = pheno450k_allCE, x = "Age", y = "RPC", color = "Sex", palette = sexpal, point = TRUE, facet.by = "CellType", add = "reg.line", conf.int = TRUE, size = 1) +
+  stat_cor(aes(color = Sex), method = "spearman") +
+  theme(strip.text = element_text(size = 14, face = "bold"),    text = element_text(size = 14, face = "bold"),
+legend.title = element_text(face = "bold"), axis.title = element_text(face = "bold"), axis.text = element_text(face = "plain", size = 12), legend.position = "right", axis.title.x = element_text(margin = margin(0.5, 0, 0, 0, unit = "cm")), axis.title.y = element_text(margin = margin(0, 0.5, 0, 0, unit = "cm")))
+# , plot.tag = element_text(face = "bold")
+dev.off()
+
+```
+
+```{r ggpairs, eval = FALSE, include = FALSE}
+
+rpc_cols <- c(1,8:10,16:19,43:48,61,62)
+cp_cols <- c(1,8:10,16:19,55:62)
+
+pdf(file = paste0(out_dir,"ggpairs_RPC.pdf"), width = 17, height = 11, title = paste0("ggpairs_RPC"), bg = "transparent")
+
+print(ggpairs(data = CombPheno2wcue2, columns = rpc_cols, alpha = 0.8))
+print(ggpairs(data = CombPheno2wcue2, columns = rpc_cols, alpha = 0.8, color = "Sex"))
+
+dev.off()
+
+pdf(file = paste0(out_dir,"ggpairs_CP.pdf"), width = 17, height = 11, title = paste0("ggpairs_CP"), bg = "transparent")
+
+print(ggpairs(data = CombPheno2wcue2, columns = cp_cols, alpha = 0.8))
+print(ggpairs(data = CombPheno2wcue2, columns = cp_cols, alpha = 0.8, color = "Sex"))
+
+dev.off()
+
+```
+
+
+```{r corcomp-age}
+
+rpc_ct <- CombPheno2wcue2 %>% dplyr::select(starts_with("RPC_")) %>% colnames()
+cp_ct <- CombPheno2wcue2 %>% dplyr::select(starts_with("CP_")) %>% colnames()
+
+rpc_age <- lapply(rpc_ct, function(cell){
+  lab <- gsub(cell, pattern = "_", replacement = " ")
+  ggscatter(data = CombPheno2wcue2, x = "Age", y = cell, point = TRUE, add = "reg.line", conf.int = TRUE, size = 1, ylab = lab) +
+  stat_cor(method = "spearman") 
+
+})
+
+cp_age <- lapply(cp_ct, function(cell){
+  lab <- gsub(cell, pattern = "_", replacement = " ")
+  ggscatter(data = CombPheno2wcue2, x = "Age", y = cell, point = TRUE, add = "reg.line", conf.int = TRUE, size = 1, ylab = lab) +
+  stat_cor(method = "spearman") 
+
+})
+
+
+pdf(file = paste0(out_dir, "CorComp_Age_spearman_diffs.pdf"), width = 9, height = 5, title = paste0("CorComp_age_spearman"), bg = "transparent")
+
+ggarrange(plotlist = rpc_age, ncol = 3, nrow = 2)
+ggarrange(plotlist = cp_age, ncol = 3, nrow = 2)
+
+dev.off()
+
+```
+
+
+```{r corcomp-age-bysex, eval = FALSE, include = FALSE}
+
+rpc_ages <- lapply(rpc_ct, function(cell){
+  lab <- gsub(cell, pattern = "_", replacement = " ")
+  ggscatter(data = CombPheno2wcue2, x = "Age", y = cell, color = "Sex", palette = sexpal, point = TRUE, ylab = lab, add = "reg.line", conf.int = TRUE, size = 1) +
+  stat_cor(aes(color = Sex), method = "spearman")
+
+})
+
+cp_ages <- lapply(cp_ct, function(cell){
+  lab <- gsub(cell, pattern = "_", replacement = " ")
+  ggscatter(data = CombPheno2wcue2, x = "Age", y = cell, color = "Sex", palette = sexpal, point = TRUE, ylab = lab, add = "reg.line", conf.int = TRUE, size = 1) +
+  stat_cor(aes(color = Sex), method = "spearman")
+  
+})
+
+
+pdf(file = paste0(out_dir, "CorComp_Age_spearman_diffs_bySex.pdf"), width = 9, height = 5, title = paste0("CorComp_age_spearman_diffs_bySex"), bg = "transparent")
+
+ggarrange(plotlist = rpc_ages, ncol = 3, nrow = 2, legend = "top", common.legend = TRUE)
+ggarrange(plotlist = cp_ages, ncol = 3, nrow = 2, legend = "top", common.legend = TRUE)
+
+dev.off()
+
+```
+
+```{r na-age}
+CombPheno2wcue2 %>% filter(is.na(Age))
+```
+
+```{r rpc_cor_ke}
+
+rpc_cor_ke <- lapply(rpc_ct, function(x){
+  
+  cor <- cor.test(CombPheno2wcue2[,x], CombPheno2wcue2$Age, method = "kendall", continuity = TRUE)
+  print(cor)
+  
+})
+```
+
+
+```{r rpc_cor_sp}
+rpc_cor_sp <- lapply(rpc_ct, function(x){
+  
+  cor <- cor.test(CombPheno2wcue2[,x], CombPheno2wcue2$Age, method = "spearman", continuity = TRUE)
+  print(cor)
+  
+})
+```
+
+```{r rpc-pval-adj}
+
+rpc_ke_pval <- sapply(1:6, function(x) rpc_cor_ke[[x]]$p.value)
+p.adjust(rpc_ke_pval, method = "holm")
+
+rpc_sp_pval <- sapply(1:6, function(x) rpc_cor_sp[[x]]$p.value)
+p.adjust(rpc_sp_pval, method = "holm")
+
+```
+
+
+```{r cp_cor_ke}
+
+cp_cor_ke <- lapply(cp_ct, function(x){
+  
+  cor <- cor.test(CombPheno2wcue2[,x], CombPheno2wcue2$Age, method = "kendall", continuity = TRUE)
+  print(cor)
+  
+})
+```
+
+
+```{r cp_cor_sp}
+cp_cor_sp <- lapply(cp_ct, function(x){
+  
+  cor <- cor.test(CombPheno2wcue2[,x], CombPheno2wcue2$Age, method = "spearman", continuity = TRUE)
+  print(cor)
+  
+})
+```
+
+```{r cp-pval-adj}
+
+cp_ke_pval <- sapply(1:6, function(x) cp_cor_ke[[x]]$p.value)
+p.adjust(cp_ke_pval, method = "holm")
+
+cp_sp_pval <- sapply(1:6, function(x) cp_cor_sp[[x]]$p.value)
+p.adjust(cp_sp_pval, method = "holm")
+
+```

@@ -1,0 +1,169 @@
+---
+title: "Leukocyte Composition Analysis of Combined DNHS+GTP 450K Cell Estimates - non-Parametric - calculate IQR and median"
+author: "Grace Kim"
+date: '`r Sys.Date()`'
+output:
+  html_notebook: default
+  html_document: default
+  pdf_document: 
+    includes:
+        in_header:table-template.tex
+---
+
+```{r knitrOpt, message = FALSE}
+
+library(knitr) # general-purpose package for dynamic report generation in R.
+library(rmarkdown)
+library(xtable) # export tables to LaTeX or html
+library(shiny)
+library(stargazer)
+library(tools)
+
+rm(list = ls())
+
+opts_knit$set(concordance = TRUE, self.contained = FALSE)
+
+opts_chunk$set(
+  error = FALSE,
+  tidy = TRUE,
+  warning = FALSE,
+  highlight = TRUE,
+  cache = TRUE,
+  comment = NA,
+  autodep = TRUE,
+  dev = c('png', 'pdf'),
+  fig.align = 'center',
+  fig.path = 'figure/',
+  fig.show = 'asis',
+  dpi = 300,
+  echo = TRUE,
+  out.extra = "keepaspectratio"
+) # turn on cache for increased performance and improved styling.
+
+options(stringsAsFactors = FALSE, width = 70, digits = 4)
+render_listings()
+
+library(tidyverse)
+library(GGally)
+# library(data.table)
+library(psych)
+library(rcompanion)
+library(faraway)      # glm support
+library(car)          # regression functions (continuous)
+library(sandwich) ## heteroskedasticity robust standard errors.  
+library(lmtest)   ## lm test
+library(nortest) ## normality test
+## further list of useful libraries in RegDiagNotes.Rmd
+
+## further list of useful libraries in RegDiagNotes.Rmd
+library(MASS)
+library(coin)
+library(Hmisc)
+# library(lawstat) ## for levene.test to do pval adj
+
+```
+
+This notebook loads fully processed combined DNHS+GTP 450K phenotype data that includes all cell estimates based on *EpiDISH*'s implementation of robust partial correlation (RPC) generated in the **Combined\_450K\_BatchAdjsepwComBat\_Estimates\_2.Rmd** notebook in data processing repo.  These cell estimates were calculated after combining the datasets. 
+
+```{r loadData}
+
+HM450KDat_path <- "D:/Data/DNHS_Data/DNAm_450K/"
+load(file = paste0(HM450KDat_path, "CombPheno2wcue2_incTuk.Rdata"))
+
+rm(CombPheno2wcue2_tuk)
+
+```
+
+Use untransformed data for non-parametric tests. 
+
+```{r out_dir}
+
+proj_label <- "Combined_LeukoComp_450K_nonParametric"
+processing_date <- format(Sys.time(), "%Y%m%d")
+#' git SHA1 hash of last commit.
+git <- system("git rev-parse --short HEAD", intern = TRUE)
+#' output directory for process and plots
+out_dir <- paste0(processing_date,"_",proj_label,"_",git,"/")
+print(out_dir)
+
+```
+
+
+```{r sub-bysex}
+
+cells <- CombPheno2wcue2 %>% dplyr::select(c(starts_with("RPC_"), starts_with("CP_"))) %>% colnames()
+
+rpc <- CombPheno2wcue2 %>% dplyr::select(starts_with("RPC_")) %>% colnames()
+cp <- CombPheno2wcue2 %>% dplyr::select(starts_with("CP_")) %>% colnames()
+
+CombPheno2wcue2 <- CombPheno2wcue2 %>% mutate_at(vars(cells), funs(.*100)) %>% dplyr::select(-"Smoking") %>% dplyr::rename(ancPC1 = Comp.1, ancPC2 = Comp.2, Smoking = Smoking_pm)
+
+dim(CombPheno2wcue2)
+CombPheno2wcue3 <- CombPheno2wcue2 %>% filter(!is.na(PTSDlife))
+
+```
+
+Just calculate IQR and median.  
+
+```{r rpc-sex-iqr}
+
+rpc_bySex_IQR <- lapply(rpc, function(x){
+
+    ks <- IQR(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Female"])
+    ksm <- IQR(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Male"])
+  cat("\n \n IQR for females in ", x, "\n")
+  print(ks)
+  cat("\n \n IQR for males in ", x, "\n")
+  print(ksm)
+  
+})
+
+```
+
+
+```{r cp-sex-iqr}
+
+cp_bySex_IQR <- lapply(cp, function(x){
+
+    ks <- IQR(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Female"])
+    ksm <- IQR(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Male"])
+  cat("\n \n IQR for females in ", x, "\n")
+  print(ks)
+  cat("\n \n IQR for males in ", x, "\n")
+  print(ksm)
+  
+})
+
+``` 
+
+
+```{r rpc-sex-med}
+
+rpc_bySex_med <- lapply(rpc, function(x){
+
+    ks <- median(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Female"])
+    ksm <- median(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Male"])
+  cat("\n \n median for females in ", x, "\n")
+  print(ks)
+  cat("\n \n median for males in ", x, "\n")
+  print(ksm)
+  
+})
+
+```
+
+
+```{r cp-sex-med}
+
+cp_bySex_med <- lapply(cp, function(x){
+
+    ks <- median(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Female"])
+    ksm <- median(CombPheno2wcue3[,x][CombPheno2wcue3$Sex == "Male"])
+  cat("\n \n median for females in ", x, "\n")
+  print(ks)
+  cat("\n \n median for males in ", x, "\n")
+  print(ksm)
+  
+})
+
+``` 

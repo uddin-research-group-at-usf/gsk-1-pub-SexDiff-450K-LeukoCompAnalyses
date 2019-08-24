@@ -1,0 +1,149 @@
+---
+title: "Revise Figure 3 - Combined DNHS+GTP 450K Cell Estimates - v3"
+author: "Grace Kim"
+date: '`r Sys.Date()`'
+output:
+  html_notebook: default
+  html_document: default
+  pdf_document: 
+    includes:
+        in_header:table-template.tex
+---
+
+
+```{r knitrOpt, message = FALSE}
+
+library(knitr) # general-purpose package for dynamic report generation in R.
+library(rmarkdown)
+library(xtable) # export tables to LaTeX or html
+library(shiny)
+library(stargazer)
+library(tools)
+
+# rm(list = ls())
+
+opts_knit$set(concordance = TRUE, self.contained = FALSE)
+
+opts_chunk$set(
+  error = FALSE,
+  tidy = TRUE,
+  warning = FALSE,
+  highlight = TRUE,
+  cache = TRUE,
+  comment = NA,
+  autodep = TRUE,
+  dev = c('png', 'pdf'),
+  fig.align = 'center',
+  fig.path = 'figure/',
+  fig.show = 'asis',
+  dpi = 300,
+  echo = TRUE,
+  out.extra = "keepaspectratio"
+) # turn on cache for increased performance and improved styling.
+
+options(stringsAsFactors = FALSE, width = 70, digits = 4)
+render_listings()
+
+library(tidyverse)
+library(GGally)
+library(data.table)
+library(ggpubr)
+library(ggsci)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(RColorBrewer)
+library(scales)
+
+```
+
+Generates some additional plots and figures, not in original set generated in **Combined_LeukoComp_450K_FigPlots.Rmd**.  
+Load saved image from original set.  
+
+```{r loadData-old-image}
+
+# load("E://GitHub Repositories/gsk-1-SexDiff-Leukocyte/Combined_LeukoComp/20181119_Combined_LeukoComp_450K_Figures_Plots_930ea9a/Combined_LeukoComp_450K_Figures_Plots.RData")
+
+HM450KDat_path <- "D:/Data/DNHS_Data/DNAm_450K/"
+load(file = paste0(HM450KDat_path, "CombPheno2wcue2_incTuk.Rdata"))
+
+source("../ModelFxns.R")
+source("../PlotFxns.R")
+
+table(CombPheno2wcue2$PTSDlife, CombPheno2wcue2$Sex)
+
+```
+
+```{r out_dir}
+
+proj_label <- "Fig3_revise"
+processing_date <- format(Sys.time(), "%Y%m%d")
+#' git SHA1 hash of last commit.
+git <- system("git rev-parse --short HEAD", intern = TRUE)
+#' output directory for process and plots
+out_dir <- paste0(processing_date,"_",proj_label,"_",git,"/")
+print(out_dir)
+
+if (!file.exists(out_dir)) {
+dir.create(out_dir,showWarnings = FALSE,recursive = FALSE)
+}
+
+```
+
+
+```{r CombPheno2wcue2-rmpheno}
+
+cells <- CombPheno2wcue2 %>% dplyr::select(c(ends_with("_Mono"), ends_with("_Gran"), ends_with("_CD4T"), ends_with("_CD8T"), ends_with("_NK"), ends_with("_B", ignore.case = FALSE))) %>% dplyr::select(-starts_with("CBS_")) %>% colnames()
+
+ptsdpal <- c("#619CFF", "#DC0000E5") ## 
+
+CombPheno2wcue2 <- CombPheno2wcue2 %>% mutate_at(vars(cells), funs(.*100)) %>% filter(!is.na(PTSDlife)) %>% mutate(PTSDlife = factor(PTSDlife, labels = c("No PTSD", "PTSD")))
+
+CombPheno2wcue2
+
+```
+
+- scale everything as percent.
+- add xlabel to fig3.
+
+```{r fig3-density-mono-bySex-fig-ggpubr}
+
+rpc_ptsdlifed <- ggdensity(CombPheno2wcue2, x = "RPC_Mono", color = "PTSDlife", fill = "PTSDlife", palette = ptsdpal, facet.by = "Sex", alpha = 0.4, rug = TRUE, legend.title = "Lifetime PTSD", xlab = "RPC Mono") + theme(strip.text = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 11, face = "plain"),
+        legend.title = element_text(face = "bold", size = 12), axis.title = element_text(size = 12, face = "bold"),
+        axis.text = element_text(size = 12, face = "plain"),
+        legend.position = "top", axis.title.x = element_text(margin = margin(0.23, 0, 0, 0, unit = "cm")))
+
+cp_ptsdlifed <- ggdensity(CombPheno2wcue2, x = "CP_Mono", color = "PTSDlife", fill = "PTSDlife", palette = ptsdpal, facet.by = "Sex", alpha = 0.4, rug = TRUE, legend.title = "Lifetime PTSD", xlab = "CP Mono") + theme(strip.text = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 11, face = "plain"),
+        legend.title = element_text(face = "bold", size = 12), axis.title = element_text(size = 12, face = "bold"),
+        axis.text = element_text(size = 12, face = "plain"),
+        legend.position = "top", axis.title.x = element_text(margin = margin(0.23, 0, 0, 0, unit = "cm")))
+
+pdf(file = paste0(out_dir,"Fig3Raw_Mono_DensityPlot_PTSDlife.pdf"), bg = "transparent", width = 6.5, height = 7.5)
+
+print(ggarrange(rpc_ptsdlifed, cp_ptsdlifed, nrow = 2, legend = "top"))
+  
+dev.off()
+
+```
+
+
+Figure 4 raw files were derived separately in emmeans analysis folder.  
+
+## Save
+
+```{r date-git}
+
+cat("\n \n This iteration was run on ", processing_date, ".  SHA1 hash for last git commit is ", git, ". \n \n ", sep = "")
+
+```
+
+```{r sessionInfo}
+
+save.image(paste0(out_dir, proj_label, ".RData"))
+
+sessionInfo()
+
+```
+

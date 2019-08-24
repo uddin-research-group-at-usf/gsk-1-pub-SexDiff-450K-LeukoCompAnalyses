@@ -1,0 +1,304 @@
+---
+title: "Leukocyte Composition Analysis of Combined DNHS+GTP 450K Cell Estimates - non-parametric, sex-stratified analyses for PTSDStatus"
+author: "Grace Kim"
+date: '`r Sys.Date()`'
+output:
+  html_notebook: default
+  html_document: default
+  pdf_document: 
+    includes:
+        in_header:table-template.tex
+---
+
+```{r knitrOpt, message = FALSE}
+
+library(knitr) # general-purpose package for dynamic report generation in R.
+library(rmarkdown)
+library(xtable) # export tables to LaTeX or html
+library(shiny)
+library(stargazer)
+library(tools)
+
+rm(list = ls())
+
+opts_knit$set(concordance = TRUE, self.contained = FALSE)
+
+opts_chunk$set(
+  error = FALSE,
+  tidy = TRUE,
+  warning = FALSE,
+  highlight = TRUE,
+  cache = TRUE,
+  comment = NA,
+  autodep = TRUE,
+  dev = c('png', 'pdf'),
+  fig.align = 'center',
+  fig.path = 'figure/',
+  fig.show = 'asis',
+  dpi = 300,
+  echo = TRUE,
+  out.extra = "keepaspectratio"
+) # turn on cache for increased performance and improved styling.
+
+options(stringsAsFactors = FALSE, width = 70, digits = 4)
+render_listings()
+
+library(tidyverse)
+library(GGally)
+# library(data.table)
+library(psych)
+library(rcompanion)
+library(faraway)      # glm support
+library(car)          # regression functions (continuous)
+library(sandwich) ## heteroskedasticity robust standard errors.  
+library(lmtest)   ## lm test
+library(nortest) ## normality test
+## further list of useful libraries in RegDiagNotes.Rmd
+
+## further list of useful libraries in RegDiagNotes.Rmd
+library(MASS)
+library(coin)
+library(Hmisc)
+# library(lawstat) ## for levene.test to do pval adj
+
+```
+
+This notebook loads fully processed combined DNHS+GTP 450K phenotype data that includes all cell estimates based on *EpiDISH*'s implementation of robust partial correlation (RPC) generated in the **Combined\_450K\_BatchAdjsepwComBat\_Estimates\_2.Rmd** notebook in data processing repo.  These cell estimates were calculated after combining the datasets. 
+
+```{r loadData}
+
+HM450KDat_path <- "D:/Data/DNHS_Data/DNAm_450K/"
+load(file = paste0(HM450KDat_path, "CombPheno2wcue2_incTuk.Rdata"))
+
+source("../ModelFxns.R")
+source("../PlotFxns.R")
+
+rm(CombPheno2wcue2_tuk)
+
+```
+
+Use untransformed data for non-parametric tests. 
+
+```{r out_dir}
+
+proj_label <- "Combined_LeukoComp_450K_nonParametric_SexStrat_PTSDStatus_MO"
+processing_date <- format(Sys.time(), "%Y%m%d")
+#' git SHA1 hash of last commit.
+git <- system("git rev-parse --short HEAD", intern = TRUE)
+#' output directory for process and plots
+out_dir <- paste0(processing_date,"_",proj_label,"_",git,"/")
+print(out_dir)
+
+# if (!file.exists(out_dir)) {
+# dir.create(out_dir,showWarnings = FALSE,recursive = FALSE)
+# }
+
+```
+
+
+```{r sub-bysex}
+
+cells <- CombPheno2wcue2 %>% dplyr::select(c(starts_with("RPC_"), starts_with("CP_"))) %>% colnames()
+
+# rpc <- CombPheno2wcue2 %>% dplyr::select(starts_with("RPC_")) %>% colnames()
+
+CombPheno2wcue2 <- CombPheno2wcue2 %>% filter(!is.na(PTSDlife)) %>% mutate_at(vars(cells), funs(.*100)) %>% dplyr::select(-"Smoking") %>% dplyr::rename(ancPC1 = Comp.1, ancPC2 = Comp.2, Smoking = Smoking_pm)
+
+CombPheno2wcue2_m <- CombPheno2wcue2 %>% filter(Sex == "Male")
+CombPheno2wcue2_f <- CombPheno2wcue2 %>% filter(Sex == "Female")
+
+```
+
+```{r fxn-nonparatests}
+
+nonParaTests <- function(data, testvar, cellset){
+  
+  testset <- lapply(cellset, function(x){
+    
+    lvlfctr <- levels(data[,testvar])
+    form <- data[,x] ~ data[,testvar]
+    
+    if (length(lvlfctr) == 2) {
+      cat("\n \n Checking normality, variance, and differences between groups for ", x, ". \n")
+      print(shapiro.test(data[,x]))
+      print(shapiro.test(data[,x][data[,testvar] == lvlfctr[[1]]]))
+      print(shapiro.test(data[,x][data[,testvar] == lvlfctr[[2]]]))
+      print(leveneTest(form, data = data))
+
+    wt <- wilcox.test(form, data = data, paired = FALSE)
+    print(wt)
+    wt2 <- coin::wilcox_test(form, data = data, distribution = "exact")
+    print(wt2)
+
+list <- list(wt = wt, wt2 = wt2)
+return(list)
+    
+    }
+    
+    if (length(lvlfctr) > 2) {
+      cat("\n \n Checking normality, variance, and differences between groups for ", x, ". \n")
+    print(shapiro.test(data[,x]))
+    print(shapiro.test(data[,x][data[,testvar] == lvlfctr[[1]]]))
+    print(shapiro.test(data[,x][data[,testvar] == lvlfctr[[2]]]))
+    print(shapiro.test(data[,x][data[,testvar] == lvlfctr[[3]]]))
+    print(leveneTest(form, data = data))
+
+    wt <- kruskal.test(form, data = data)
+    print(wt)
+    
+    list <- list(wt = wt)
+    }
+    
+  return(list)
+  })
+  
+pvalwt <- vector(length = length(testset))
+
+  for (i in 1:length(testset)) {
+  pvalwt[i] <- testset[[i]]$wt$p.value
+  }
+method <- c("holm", "none")
+
+pvaladj <- lapply(method, function(x){
+  print(x)
+  pvaladj_kw <- p.adjust(unlist(pvalwt), method = x)
+print(pvaladj_kw) 
+
+return(pvaladj_kw)
+})
+
+list2 <- list(testset = testset, pvaladj = pvaladj)
+
+  return(list2)
+}
+
+```
+
+
+
+
+## PTSD Status 
+
+```{r CombPheno2wcue3}
+
+CombPheno2wcue3 <- CombPheno2wcue2 %>% filter(!is.na(PTSDStatus))
+
+CombPheno2wcue3_m <- CombPheno2wcue3 %>% filter(Sex == "Male")
+
+CombPheno2wcue3_f <- CombPheno2wcue3 %>% filter(Sex == "Female")
+
+table(CombPheno2wcue3$PTSDStatus, CombPheno2wcue3$Sex)
+
+```
+
+
+### RPC
+
+```{r rpc-male-ptsdstatus}
+
+rpc_male_PTSDStatus <- nonParaTests(data = CombPheno2wcue3_m, testvar = "PTSDStatus", cellset = "RPC_Mono")
+
+```
+
+Significant finding only in RPC monocytes in males.  
+
+```{r rpc-female-ptsdstatus}
+
+rpc_female_PTSDStatus <- nonParaTests(data = CombPheno2wcue3_f, testvar = "PTSDStatus", cellset = "RPC_Mono")
+
+```
+
+Nothing in females. 
+
+### CP Monocytes
+
+```{r cp-male-ptsdstatus}
+
+cp_male_PTSDStatus <- nonParaTests(data = CombPheno2wcue3_m, testvar = "PTSDStatus", cellset = "CP_Mono")
+
+```
+
+Finding in CP monocytes in males.       
+
+```{r cp-female-ptsdstatus}
+
+cp_female_PTSDStatus <- nonParaTests(data = CombPheno2wcue3_f, testvar = "PTSDStatus", cellset = "CP_Mono")
+
+```
+
+
+### Post-hoc Dunn tests for both monocyte estimates in males
+
+```{r dunntest}
+
+library(FSA)
+
+mono <- c("RPC_Mono", "CP_Mono")
+
+## both sexes
+
+dunn_mono_m <- lapply(mono, function(xx){
+    cat("\n \n post-hoc Dunn test in males for ", xx, " by PTSDStatus.. \n")
+    mo_kw <- dunnTest(CombPheno2wcue3_m[, xx] ~ CombPheno2wcue3_m$PTSDStatus, method = "holm")
+    print(mo_kw)
+    
+  return(mo_kw)
+})
+
+
+```
+
+Basically drives the same point.  
+Difference in males is robust and seems to drive difference seen in both sexes.  
+
+Significant comparisons were between control and both remitted and current PTSD, suggesting that lifetime PTSD status is driving difference independent of current state of PT symptoms.  
+
+## Effect size of male monocyte findings
+
+regarding calculating effect size for non-parametric tests.
+  - can calculate for any test that returns Z-score.
+  - turn into percentage variance measure of r by ... r = Z/sqrt(N), N = total num of observations.  
+  - sign doesn't give helpful info so use abs value... 
+  - r = 0.09 , example of small effect size.
+  - estimate percentage of variance explained by squaring r.
+  - r-family of effect size, which is percentage variance effect size.
+  - different from d-family of effect size.
+
+[reference for effect size here](http://documents.routledge-interactive.s3.amazonaws.com/9781138024571/supp/Classic_Non-Parametric_Statistics.JLH.pdf)
+
+```{r effect-size}
+
+nonParamEffectR <- function(Z, n){
+  r = Z/sqrt(n)
+  # print(r)
+  return(r)
+}
+
+```
+
+```{r effectsize-dunntest-PTSDStatus}
+
+tab_m <- table(CombPheno2wcue3_m$PTSDStatus)
+tab_m
+
+## dunnTest for PTSDStatus
+
+cat("\n effect size r-family, percentage variance, for RPC monocytes \n")
+nonParamEffectR(dunn_mono_m[[1]]$res$Z[[1]], tab_m[[1]] + tab_m[[3]]) ## current vs controls. males. rpc.
+nonParamEffectR(dunn_mono_m[[1]]$res$Z[[3]], tab_m[[1]] + tab_m[[2]]) ## remitted vs controls. males. rpc. inverse sign.
+nonParamEffectR(dunn_mono_m[[1]]$res$Z[[2]], tab_m[[3]] + tab_m[[2]]) ## current vs. remitted PTSD.
+
+cat("\n effect size r-family, percentage variance, for CP monocytes \n")
+nonParamEffectR(dunn_mono_m[[2]]$res$Z[[1]], tab_m[[1]] + tab_m[[3]]) ## current vs controls. males. 
+nonParamEffectR(dunn_mono_m[[2]]$res$Z[[3]], tab_m[[1]] + tab_m[[2]]) ## remitted vs controls. males. inverse sign. 
+nonParamEffectR(dunn_mono_m[[2]]$res$Z[[2]], tab_m[[3]] + tab_m[[2]]) ## current vs. remitted PTSD.
+
+```
+
+## End
+
+```{r save-end}
+
+sessionInfo()
+
+```
